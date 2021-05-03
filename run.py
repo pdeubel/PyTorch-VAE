@@ -1,13 +1,14 @@
-import yaml
 import argparse
-import numpy as np
+import os
 
-from models import *
-from experiment import VAEXperiment
 import torch.backends.cudnn as cudnn
+import yaml
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.logging import TestTubeLogger
 
+from experiment import VAEXperiment
+from models import *
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
 parser.add_argument('--config',  '-c',
@@ -41,6 +42,13 @@ model = vae_models[config['model_params']['name']](**config['model_params'])
 experiment = VAEXperiment(model,
                           config['exp_params'])
 
+# Call this explicitly otherwise the version parameter is not set of the logger which is required for the file path
+tt_logger.save()
+checkpoint_file_path = os.path.join(tt_logger.save_dir,
+                                    tt_logger.name,
+                                    f'version_{tt_logger.version}',
+                                    "checkpoints")
+
 runner = Trainer(default_save_path=f"{tt_logger.save_dir}",
                  min_nb_epochs=1,
                  logger=tt_logger,
@@ -49,6 +57,7 @@ runner = Trainer(default_save_path=f"{tt_logger.save_dir}",
                  val_percent_check=1.,
                  num_sanity_val_steps=5,
                  early_stop_callback = False,
+                 checkpoint_callback=ModelCheckpoint(filepath=checkpoint_file_path, save_top_k=-1, period=5),
                  **config['trainer_params'])
 
 print(f"======= Training {config['model_params']['name']} =======")
