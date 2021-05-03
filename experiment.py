@@ -10,6 +10,8 @@ import torchvision.utils as vutils
 from torchvision.datasets import CelebA
 from torch.utils.data import DataLoader
 
+from datasets.concrete_cracks import ConcreteCracksDataset
+
 
 class VAEXperiment(pl.LightningModule):
 
@@ -141,6 +143,10 @@ class VAEXperiment(pl.LightningModule):
                              split = "train",
                              transform=transform,
                              download=False)
+        elif self.params['dataset'] == "concrete-cracks":
+            dataset = ConcreteCracksDataset(root_dir=self.params['data_path'],
+                                            train=True,
+                                            transform=transform)
         else:
             raise ValueError('Undefined dataset type')
 
@@ -162,9 +168,18 @@ class VAEXperiment(pl.LightningModule):
                                                  batch_size= 144,
                                                  shuffle = True,
                                                  drop_last=True)
-            self.num_val_imgs = len(self.sample_dataloader)
+        elif self.params['dataset'] == 'concrete-cracks':
+            dataset = ConcreteCracksDataset(root_dir=self.params['data_path'],
+                                            train=False,
+                                            transform=transform)
+            self.sample_dataloader = DataLoader(dataset,
+                                                batch_size=144,
+                                                shuffle=True,
+                                                drop_last=True)
         else:
             raise ValueError('Undefined dataset type')
+
+        self.num_val_imgs = len(self.sample_dataloader)
 
         return self.sample_dataloader
 
@@ -177,6 +192,10 @@ class VAEXperiment(pl.LightningModule):
             transform = transforms.Compose([transforms.RandomHorizontalFlip(),
                                             transforms.CenterCrop(148),
                                             transforms.Resize(self.params['img_size']),
+                                            transforms.ToTensor(),
+                                            SetRange])
+        elif self.params['dataset'] == 'concrete-cracks':
+            transform = transforms.Compose([transforms.Resize(self.params['img_size']),
                                             transforms.ToTensor(),
                                             SetRange])
         else:
