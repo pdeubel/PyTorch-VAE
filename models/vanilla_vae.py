@@ -139,11 +139,12 @@ class VanillaVAE(BaseVAE):
         kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
         recons_loss =F.mse_loss(recons, input)
 
-
         kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
 
         loss = recons_loss + kld_weight * kld_loss
-        return {'loss': loss, 'Reconstruction_Loss':recons_loss, 'KLD':-kld_loss}
+        return {'loss': loss, 'Reconstruction_Loss': recons_loss, 'KLD': -kld_loss,
+                'mu': torch.mean(torch.sum(mu, dim=1)), 'log_var': torch.mean(torch.sum(log_var, dim=1)),
+                'var': torch.mean(torch.sum(log_var.exp(), dim=1))}
 
     def sample(self,
                num_samples:int,
