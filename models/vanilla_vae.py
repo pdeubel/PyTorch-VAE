@@ -33,14 +33,16 @@ class VanillaVAE(BaseVAE):
             in_channels = h_dim
 
         self.encoder = nn.Sequential(*modules)
-        self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
-        self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        # TODO I hacked this hardcoded value into here because original author did the same, should be better done
+        self.fc_mu = nn.Linear(hidden_dims[-1]*49, latent_dim)
+        self.fc_var = nn.Linear(hidden_dims[-1]*49, latent_dim)
 
 
         # Build Decoder
         modules = []
 
-        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+        # TODO Same as above, redo the hardcoded stuff
+        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 49)
 
         hidden_dims.reverse()
 
@@ -99,7 +101,8 @@ class VanillaVAE(BaseVAE):
         :return: (Tensor) [B x C x H x W]
         """
         result = self.decoder_input(z)
-        result = result.view(-1, 512, 2, 2)
+        # TODO These hardcoded values should also be changed
+        result = result.view(-1, 512, 7, 7)
         result = self.decoder(result)
         result = self.final_layer(result)
         return result
