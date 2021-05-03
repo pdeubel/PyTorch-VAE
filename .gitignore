@@ -9,4 +9,7 @@ __pycache__/
 
 Run.ipynb
 
+# Pycharm
 .idea/
+
+venv/
