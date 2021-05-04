@@ -8,11 +8,12 @@ from .types_ import *
 class VanillaVAEUNet(BaseVAE):
 
     def __init__(self,
+                 params: dict,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims: List = None,
                  **kwargs) -> None:
-        super().__init__()
+        super().__init__(params)
 
         self.latent_dim = latent_dim
 
@@ -37,9 +38,11 @@ class VanillaVAEUNet(BaseVAE):
         # Build Encoder
         self.encoder_modules = nn.ModuleList()
 
+        _in_channels = in_channels
+
         for h_dim in hidden_dims:
             sequential = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels=h_dim, kernel_size= 3, stride= 2, padding  = 1),
+                nn.Conv2d(_in_channels, out_channels=h_dim, kernel_size=3, stride=2, padding=1),
                 nn.BatchNorm2d(h_dim),
                 nn.LeakyReLU()
             )
@@ -47,7 +50,7 @@ class VanillaVAEUNet(BaseVAE):
             # sequential.register_forward_hook(print_input_forward_hook)
 
             self.encoder_modules.append(sequential)
-            in_channels = h_dim
+            _in_channels = h_dim
 
         # TODO I hacked this hardcoded value into here because original author did the same, should be better done
         self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
@@ -60,6 +63,8 @@ class VanillaVAEUNet(BaseVAE):
         # TODO Same as above, redo the hardcoded stuff
         self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
 
+        # TODO change this to use [::-1] then remove this reverse. This is buggy because the model checkpointing
+        #  saved the reverse hidden dims and this caused issues
         hidden_dims.reverse()
 
         for i in range(len(hidden_dims) - 1):
@@ -112,6 +117,9 @@ class VanillaVAEUNet(BaseVAE):
         )
 
         # self.final_layer.register_forward_hook(print_input_forward_hook)
+        hidden_dims.reverse()
+
+        self.save_hyperparameters()
 
     def encode(self, input: Tensor) -> List[Tensor]:
         """

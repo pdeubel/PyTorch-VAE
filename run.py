@@ -5,9 +5,9 @@ import torch.backends.cudnn as cudnn
 import yaml
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.logging import TestTubeLogger
+from pytorch_lightning.loggers import TestTubeLogger
+from torchsummary import summary
 
-from experiment import VAEXperiment
 from models import *
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
@@ -38,27 +38,23 @@ np.random.seed(config['logging_params']['manual_seed'])
 cudnn.deterministic = True
 cudnn.benchmark = False
 
-model = vae_models[config['model_params']['name']](**config['model_params'])
-experiment = VAEXperiment(model,
-                          config['exp_params'])
+model = vae_models[config['model_params']['name']](config['exp_params'], **config['model_params'])
 
 # Call this explicitly otherwise the version parameter is not set of the logger which is required for the file path
-tt_logger.save()
-checkpoint_file_path = os.path.join(tt_logger.save_dir,
-                                    tt_logger.name,
-                                    f'version_{tt_logger.version}',
-                                    "checkpoints")
+# tt_logger.save()
+# checkpoint_file_path = os.path.join(tt_logger.save_dir,
+#                                     tt_logger.name,
+#                                     f'version_{tt_logger.version}',
+#                                     "checkpoints")
+# callbacks=ModelCheckpoint(dirpath=checkpoint_file_path, save_top_k=-1, period=1),
 
-runner = Trainer(default_save_path=f"{tt_logger.save_dir}",
-                 min_nb_epochs=1,
+runner = Trainer(default_root_dir=f"{tt_logger.save_dir}",
+                 min_epochs=1,
                  logger=tt_logger,
-                 log_save_interval=100,
-                 train_percent_check=1.,
-                 val_percent_check=1.,
+                 limit_train_batches=1.0,
+                 limit_val_batches=1.0,
                  num_sanity_val_steps=5,
-                 early_stop_callback = False,
-                 checkpoint_callback=ModelCheckpoint(filepath=checkpoint_file_path, save_top_k=-1, period=5),
                  **config['trainer_params'])
 
 print(f"======= Training {config['model_params']['name']} =======")
-runner.fit(experiment)
+runner.fit(model)
