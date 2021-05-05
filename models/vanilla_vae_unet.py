@@ -17,9 +17,6 @@ class VanillaVAEUNet(BaseVAE):
 
         self.latent_dim = latent_dim
 
-        self.encoder_results = []
-        self.decoder_results = []
-
         if hidden_dims is None:
             hidden_dims = [32, 64, 128, 256, 512]
 
@@ -136,12 +133,12 @@ class VanillaVAEUNet(BaseVAE):
 
         # TODO this could be a problem when the memory is not freed immediately on the GPU. A solution would be to
         #  explicitly delete the list and Tensors
-        self.encoder_results = []
+        encoder_results = []
 
         for encoder_layer in self.encoder_modules:
             x = encoder_layer(x)
 
-            self.encoder_results.append(x)
+            encoder_results.append(x)
 
         result = x
 
@@ -152,9 +149,9 @@ class VanillaVAEUNet(BaseVAE):
         mu = self.fc_mu(result)
         log_var = self.fc_var(result)
 
-        return [mu, log_var]
+        return [mu, log_var, encoder_results]
 
-    def decode(self, z: Tensor) -> Tensor:
+    def decode(self, z: Tensor, encoder_results: list = None) -> Tensor:
         """
         Maps the given latent codes
         onto the image space.
@@ -171,12 +168,16 @@ class VanillaVAEUNet(BaseVAE):
 
         x = result
 
-        decoder_iteration = zip(self.decoder_modules, self.decoder_downsample_modules, self.encoder_results[::-1])
+        if encoder_results is not None:
+            decoder_iteration = zip(self.decoder_modules, self.decoder_downsample_modules, encoder_results[::-1])
 
-        for decoder_layer, downsample_module, encoder_layer_result in decoder_iteration:
-            x = torch.cat([encoder_layer_result, x], dim=1)
-            x = downsample_module(x)
-            x = decoder_layer(x)
+            for decoder_layer, downsample_module, encoder_layer_result in decoder_iteration:
+                x = torch.cat([encoder_layer_result, x], dim=1)
+                x = downsample_module(x)
+                x = decoder_layer(x)
+        else:
+            for decoder_layer in self.decoder_modules:
+                x = decoder_layer(x)
 
         result = self.final_layer(x)
 
@@ -195,9 +196,9 @@ class VanillaVAEUNet(BaseVAE):
         return eps * std + mu
 
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
-        mu, log_var = self.encode(input)
+        mu, log_var, encoder_results = self.encode(input)
         z = self.reparameterize(mu, log_var)
-        return [self.decode(z), input, mu, log_var]
+        return [self.decode(z, encoder_results), input, mu, log_var]
 
     def loss_function(self,
                       *args,
@@ -225,7 +226,7 @@ class VanillaVAEUNet(BaseVAE):
                 'var': torch.mean(torch.sum(log_var.exp(), dim=1))}
 
     def sample(self,
-               num_samples:int,
+               num_samples: int,
                current_device: int, **kwargs) -> Tensor:
         """
         Samples from the latent space and return the corresponding
