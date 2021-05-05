@@ -209,11 +209,11 @@ class BaseVAE(pl.LightningModule):
         if self.params['dataset'] == 'celeba':
             transform = transforms.Compose([transforms.RandomHorizontalFlip(),
                                             transforms.CenterCrop(148),
-                                            transforms.Resize(self.params['img_size']),
+                                            transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
         elif self.params['dataset'] == 'concrete-cracks':
-            transform = transforms.Compose([transforms.Resize(self.params['img_size']),
+            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
         else:
