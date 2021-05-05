@@ -14,10 +14,10 @@ exp_params:
   scheduler_gamma: 0.95
 
 trainer_params:
-  gpus: [3]
+  gpus: [2]
   max_epochs: 10
 
 logging_params:
-  save_dir: "logs/"
+  save_dir: "/cvhci/temp/p21g3/PyTorch-VAE/logs/"
   name: "VanillaVAEUNet"
   manual_seed: 42
