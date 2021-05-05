@@ -1,5 +1,6 @@
 from abc import abstractmethod
 
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import torch
 import torchvision.utils as vutils
@@ -50,6 +51,7 @@ class BaseVAE(pl.LightningModule):
                                         optimizer_idx=optimizer_idx,
                                         batch_idx=batch_idx)
 
+        # TODO this is deprecated
         self.logger.experiment.log({key: val.item() for key, val in train_loss.items()})
 
         return train_loss
@@ -72,17 +74,24 @@ class BaseVAE(pl.LightningModule):
         self.sample_images()
         return {'val_loss': avg_loss, 'log': tensorboard_logs}
 
-    def sample_images(self):
+    def sample_images(self, save=True, display=False):
         # Get sample reconstruction image
         test_input, test_label = next(iter(self.sample_dataloader))
         test_input = test_input.to(self.curr_device)
         test_label = test_label.to(self.curr_device)
         recons = self.generate(test_input, labels=test_label)
-        vutils.save_image(recons.data,
-                          f"{self.logger.save_dir}{self.logger.name}/version_{self.logger.version}/"
-                          f"recons_{self.logger.name}_{self.current_epoch}.png",
-                          normalize=True,
-                          nrow=12)
+
+        if save:
+            vutils.save_image(recons.data,
+                              f"{self.logger.save_dir}{self.logger.name}/version_{self.logger.version}/"
+                              f"recons_{self.logger.name}_{self.current_epoch}.png",
+                              normalize=True,
+                              nrow=12)
+
+        if display:
+            plt.imshow(vutils.make_grid(recons.data, normalize=True, nrow=12).permute(2, 1, 0).numpy())
+            plt.title("Reconstructed images")
+            plt.show()
 
         # vutils.save_image(test_input.data,
         #                   f"{self.logger.save_dir}{self.logger.name}/version_{self.logger.version}/"
@@ -94,11 +103,16 @@ class BaseVAE(pl.LightningModule):
             samples = self.sample(144,
                                   self.curr_device,
                                   labels=test_label)
-            vutils.save_image(samples.cpu().data,
-                              f"{self.logger.save_dir}{self.logger.name}/version_{self.logger.version}/"
-                              f"{self.logger.name}_{self.current_epoch}.png",
-                              normalize=True,
-                              nrow=12)
+            if save:
+                vutils.save_image(samples.cpu().data,
+                                  f"{self.logger.save_dir}{self.logger.name}/version_{self.logger.version}/"
+                                  f"{self.logger.name}_{self.current_epoch}.png",
+                                  normalize=True,
+                                  nrow=12)
+            if display:
+                plt.imshow(vutils.make_grid(samples.data, normalize=True, nrow=12).permute(2, 1, 0).numpy())
+                plt.title("Sampled images")
+                plt.show()
         except:
             pass
 

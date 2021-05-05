@@ -8,3 +8,4 @@ torchfile
 torchnet
 torchsummary
 torchvision
+matplotlib
