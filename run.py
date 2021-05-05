@@ -22,6 +22,7 @@ parser.add_argument('--load', '-l',
                     help='Path to checkpoint to load experiment from',
                     default=None)
 parser.add_argument('--sample', '-s',
+                    action='store_true',
                     help='Reconstruct image and plot it')
 
 args = parser.parse_args()
