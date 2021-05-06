@@ -1,8 +1,10 @@
+from typing import List
+
 import torch
-from models import BaseVAE
 from torch import nn
 from torch.nn import functional as F
-from .types_ import *
+
+from models import BaseVAE
 
 
 class VanillaVAEUNet(BaseVAE):
@@ -50,8 +52,8 @@ class VanillaVAEUNet(BaseVAE):
             _in_channels = h_dim
 
         # TODO I hacked this hardcoded value into here because original author did the same, should be better done
-        self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
-        self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        self.fc_mu = nn.Linear(hidden_dims[-1] * 4, latent_dim)
+        self.fc_var = nn.Linear(hidden_dims[-1] * 4, latent_dim)
 
         # Build Decoder
         self.decoder_modules = nn.ModuleList()
@@ -69,7 +71,7 @@ class VanillaVAEUNet(BaseVAE):
                 nn.ConvTranspose2d(hidden_dims[i],
                                    hidden_dims[i + 1],
                                    kernel_size=3,
-                                   stride = 2,
+                                   stride=2,
                                    padding=1,
                                    output_padding=1),
                 nn.BatchNorm2d(hidden_dims[i + 1]),
@@ -80,12 +82,13 @@ class VanillaVAEUNet(BaseVAE):
 
             self.decoder_modules.append(sequential)
 
-            self.decoder_downsample_modules.append(
+            self.decoder_downsample_modules.extend([
                 nn.Conv2d(hidden_dims[i] * 2,
                           hidden_dims[i],
                           kernel_size=3,
-                          padding=1)
-            )
+                          padding=1),
+                nn.LeakyReLU()
+            ])
 
         self.decoder_modules.append(nn.Sequential(
             nn.ConvTranspose2d(hidden_dims[-1],
@@ -98,12 +101,13 @@ class VanillaVAEUNet(BaseVAE):
             nn.LeakyReLU())
         )
 
-        self.decoder_downsample_modules.append(
+        self.decoder_downsample_modules.extend([
             nn.Conv2d(hidden_dims[-1] * 2,
                       hidden_dims[-1],
                       kernel_size=3,
-                      padding=1)
-        )
+                      padding=1),
+            nn.LeakyReLU()
+        ])
 
         self.final_layer = nn.Sequential(
             nn.Conv2d(hidden_dims[-1],
@@ -118,7 +122,7 @@ class VanillaVAEUNet(BaseVAE):
 
         self.save_hyperparameters()
 
-    def encode(self, input: Tensor) -> List[Tensor]:
+    def encode(self, input: torch.Tensor) -> List[torch.Tensor]:
         """
         Encodes the input by passing through the encoder network
         and returns the latent codes.
@@ -151,7 +155,7 @@ class VanillaVAEUNet(BaseVAE):
 
         return [mu, log_var, encoder_results]
 
-    def decode(self, z: Tensor, encoder_results: list = None) -> Tensor:
+    def decode(self, z: torch.Tensor, encoder_results: list = None) -> torch.Tensor:
         """
         Maps the given latent codes
         onto the image space.
@@ -183,7 +187,7 @@ class VanillaVAEUNet(BaseVAE):
 
         return result
 
-    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
+    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """
         Reparameterization trick to sample from N(mu, var) from
         N(0,1).
@@ -195,7 +199,7 @@ class VanillaVAEUNet(BaseVAE):
         eps = torch.randn_like(std)
         return eps * std + mu
 
-    def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
+    def forward(self, input: torch.Tensor, **kwargs) -> List[torch.Tensor]:
         mu, log_var, encoder_results = self.encode(input)
         z = self.reparameterize(mu, log_var)
         return [self.decode(z, encoder_results), input, mu, log_var]
@@ -215,19 +219,18 @@ class VanillaVAEUNet(BaseVAE):
         mu = args[2]
         log_var = args[3]
 
-        kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
-        recons_loss =F.mse_loss(recons, input)
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
+        recons_loss = F.mse_loss(recons, input)
 
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
 
         loss = recons_loss + kld_weight * kld_loss
-        return {'loss': loss, 'Reconstruction_Loss': recons_loss, 'KLD': -kld_loss,
-                'mu': torch.mean(torch.sum(mu, dim=1)), 'log_var': torch.mean(torch.sum(log_var, dim=1)),
-                'var': torch.mean(torch.sum(log_var.exp(), dim=1))}
+        return {'loss': loss, 'Reconstruction_Loss': recons_loss, 'KLD': -kld_loss, 'mu': torch.mean(mu),
+                'log_var': torch.mean(log_var), 'var': torch.mean(log_var.exp())}
 
     def sample(self,
                num_samples: int,
-               current_device: int, **kwargs) -> Tensor:
+               current_device: int, **kwargs) -> torch.Tensor:
         """
         Samples from the latent space and return the corresponding
         image space map.
@@ -243,7 +246,7 @@ class VanillaVAEUNet(BaseVAE):
         samples = self.decode(z)
         return samples
 
-    def generate(self, x: Tensor, **kwargs) -> Tensor:
+    def generate(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Given an input image x, returns the reconstructed image
         :param x: (Tensor) [B x C x H x W]
