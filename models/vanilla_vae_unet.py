@@ -82,13 +82,13 @@ class VanillaVAEUNet(BaseVAE):
 
             self.decoder_modules.append(sequential)
 
-            self.decoder_downsample_modules.extend([
+            self.decoder_downsample_modules.append(nn.Sequential(
                 nn.Conv2d(hidden_dims[i] * 2,
                           hidden_dims[i],
                           kernel_size=3,
                           padding=1),
                 nn.LeakyReLU()
-            ])
+            ))
 
         self.decoder_modules.append(nn.Sequential(
             nn.ConvTranspose2d(hidden_dims[-1],
@@ -101,13 +101,13 @@ class VanillaVAEUNet(BaseVAE):
             nn.LeakyReLU())
         )
 
-        self.decoder_downsample_modules.extend([
+        self.decoder_downsample_modules.append(nn.Sequential(
             nn.Conv2d(hidden_dims[-1] * 2,
                       hidden_dims[-1],
                       kernel_size=3,
                       padding=1),
             nn.LeakyReLU()
-        ])
+        ))
 
         self.final_layer = nn.Sequential(
             nn.Conv2d(hidden_dims[-1],
