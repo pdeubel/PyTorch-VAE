@@ -3,6 +3,7 @@ import os
 
 import torch.backends.cudnn as cudnn
 import yaml
+from PIL import Image
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TestTubeLogger
@@ -24,6 +25,9 @@ parser.add_argument('--load', '-l',
 parser.add_argument('--sample', '-s',
                     action='store_true',
                     help='Reconstruct image and plot it')
+parser.add_argument('--anomaly', '-a',
+                    action='store_true',
+                    help='Choose random image with crack and feed into VAE')
 
 args = parser.parse_args()
 with open(args.filename, 'r') as file:
@@ -69,6 +73,25 @@ if args.sample:
     model.sample_images(save=False, display=True)
 
     print("Sampled a batch of images and plotted them.")
+elif args.anomaly:
+
+    #dir_path = "/home/pdeubel/PycharmProjects/data/Concrete-Crack-Images/Positive"
+    #img_file = np.random.choice(os.listdir(dir_path))
+
+    dir_path = "/home/pdeubel/Pictures/"
+    img_file = "butterfly.jpg"
+
+    anomaly_img = Image.open(os.path.join(dir_path, img_file))
+    anomaly_img: torch.Tensor = model.data_transforms()(anomaly_img).unsqueeze(0)
+
+    model.eval()
+    output = model.generate(anomaly_img)
+
+    show_images = torch.cat((anomaly_img, output), dim=0)
+
+    plt.imshow(vutils.make_grid(show_images, normalize=True, nrow=1).permute(2, 1, 0).numpy())
+    plt.title("Reconstructed anomaly")
+    plt.show()
 else:
     runner = Trainer(default_root_dir=f"{tt_logger.save_dir}",
                      min_epochs=1,
