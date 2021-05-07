@@ -175,10 +175,13 @@ class VanillaVAEUNet(BaseVAE):
         if encoder_results is not None:
             decoder_iteration = zip(self.decoder_modules, self.decoder_downsample_modules, encoder_results[::-1])
 
-            for decoder_layer, downsample_module, encoder_layer_result in decoder_iteration:
-                x = torch.cat([encoder_layer_result, x], dim=1)
-                x = downsample_module(x)
-                x = decoder_layer(x)
+            for i, (decoder_layer, downsample_module, encoder_layer_result) in enumerate(decoder_iteration):
+                if i <= 1:
+                    x = torch.cat([encoder_layer_result, x], dim=1)
+                    x = downsample_module(x)
+                    x = decoder_layer(x)
+                else:
+                    x = decoder_layer(x)
         else:
             for decoder_layer in self.decoder_modules:
                 x = decoder_layer(x)

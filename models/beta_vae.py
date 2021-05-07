@@ -10,6 +10,7 @@ class BetaVAE(BaseVAE):
     num_iter = 0 # Global static variable to keep track of iterations
 
     def __init__(self,
+                 params: dict,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims: List = None,
@@ -19,7 +20,7 @@ class BetaVAE(BaseVAE):
                  Capacity_max_iter: int = 1e5,
                  loss_type:str = 'B',
                  **kwargs) -> None:
-        super(BetaVAE, self).__init__()
+        super(BetaVAE, self).__init__(params)
 
         self.latent_dim = latent_dim
         self.beta = beta
@@ -84,6 +85,9 @@ class BetaVAE(BaseVAE):
                             nn.Conv2d(hidden_dims[-1], out_channels= 3,
                                       kernel_size= 3, padding= 1),
                             nn.Tanh())
+
+        hidden_dims.reverse()
+        self.save_hyperparameters()
 
     def encode(self, input: Tensor) -> List[Tensor]:
         """
