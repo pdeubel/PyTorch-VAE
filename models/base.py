@@ -167,7 +167,8 @@ class BaseVAE(pl.LightningModule):
                              download=False)
         elif self.params['dataset'] == "concrete-cracks":
             dataset = ConcreteCracksDataset(root_dir=self.params['data_path'],
-                                            train=True,
+                                            split="train",
+                                            abnormal_data=False,
                                             transform=transform)
         else:
             raise ValueError('Undefined dataset type')
@@ -191,7 +192,8 @@ class BaseVAE(pl.LightningModule):
                                                 drop_last=True)
         elif self.params['dataset'] == 'concrete-cracks':
             dataset = ConcreteCracksDataset(root_dir=self.params['data_path'],
-                                            train=False,
+                                            split="val",
+                                            abnormal_data=False,
                                             transform=transform)
             self.sample_dataloader = DataLoader(dataset,
                                                 batch_size=144,
