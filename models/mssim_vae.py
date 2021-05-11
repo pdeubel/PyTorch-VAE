@@ -9,13 +9,14 @@ from math import exp
 class MSSIMVAE(BaseVAE):
 
     def __init__(self,
+                 params: dict,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims: List = None,
                  window_size: int = 11,
                  size_average: bool = True,
                  **kwargs) -> None:
-        super(MSSIMVAE, self).__init__()
+        super().__init__(params)
 
         self.latent_dim = latent_dim
         self.in_channels = in_channels
@@ -39,7 +40,6 @@ class MSSIMVAE(BaseVAE):
         self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
         self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
 
-
         # Build Decoder
         modules = []
 
@@ -60,8 +60,6 @@ class MSSIMVAE(BaseVAE):
                     nn.LeakyReLU())
             )
 
-
-
         self.decoder = nn.Sequential(*modules)
 
         self.final_layer = nn.Sequential(
@@ -80,6 +78,10 @@ class MSSIMVAE(BaseVAE):
         self.mssim_loss = MSSIM(self.in_channels,
                                 window_size,
                                 size_average)
+
+        hidden_dims.reverse()
+
+        self.save_hyperparameters()
 
     def encode(self, input: Tensor) -> List[Tensor]:
         """
