@@ -14,9 +14,8 @@ Idea of this script:
 
 import argparse
 
-import numpy as np
-from sklearn.metrics import roc_curve, auc
 import yaml
+from sklearn.metrics import roc_curve, auc
 
 from models import *
 
@@ -30,6 +29,10 @@ parser.add_argument('--load', '-l',
                     dest='checkpoint_file',
                     metavar='FILE',
                     help='Path to checkpoint to load experiment from')
+parser.add_argument('--save_plots',
+                    type=str,
+                    help="Specify a suffix which is used to save the plots to roc_curve_suffix.svg and reconstructed "
+                         "classified_suffix.svg")
 
 args = parser.parse_args()
 
@@ -38,6 +41,13 @@ with open(args.filename, 'r') as file:
         config = yaml.safe_load(file)
     except yaml.YAMLError as exc:
         print(exc)
+
+filename_roc_curve = None
+filename_reconstructed_classified = None
+
+if args.save_plots:
+    filename_roc_curve = "roc_curve_" + args.save_plots
+    filename_reconstructed_classified = "reconstructed_classified_" + args.save_plots
 
 model = vae_models[config['model_params']['name']](config['exp_params'], **config['model_params'])
 model = model.load_from_checkpoint(args.checkpoint_file)
@@ -65,37 +75,34 @@ dataloader_abnormal = DataLoader(dataset_abnormal,
                                  shuffle=True,
                                  drop_last=True)
 
-batch_normal, labels_normal = next(iter(dataloader_normal))
-batch_abnormal, labels_abnormal = next(iter(dataloader_abnormal))
+all_labels = []
+all_pixel_wise_differences = []
 
-#random_indices_normal = np.random.randint(0, 149, size=50)
-#random_indices_abnormal = np.random.randint(0, 149, size=50)
+single_batch_for_visualization_predictions = None
+single_batch_for_visualization_pixel_wise_difference = None
 
-#batch_normal = batch_normal[random_indices_normal]
-#labels_normal = labels_normal[random_indices_normal]
+for i, (normal_data, abnormal_data) in enumerate(zip(dataloader_normal, dataloader_abnormal)):
+    batch_normal, labels_normal = normal_data
+    batch_abnormal, labels_abnormal = abnormal_data
 
-#batch_abnormal = batch_abnormal[random_indices_abnormal]
-#labels_abnormal = labels_abnormal[random_indices_abnormal]
+    batch = torch.cat([batch_normal, batch_abnormal], dim=0)
+    labels = torch.cat([labels_normal, labels_abnormal], dim=0)
 
-batch = np.concatenate([batch_normal, batch_abnormal])
-labels = np.concatenate([labels_normal, labels_abnormal])
+    with torch.no_grad():
+        predictions = model.generate(batch)
 
-assert batch.shape[0] == labels.shape[0]
+    pixel_wise_diff = torch.mean(torch.abs(predictions - batch), dim=(1, 2, 3)).numpy()
 
-indices = np.arange(batch.shape[0])
-# In-place shuffling
-np.random.shuffle(indices)
+    all_labels = np.concatenate([all_labels, labels])
+    all_pixel_wise_differences = np.concatenate([all_pixel_wise_differences, pixel_wise_diff], axis=0)
 
-batch = batch[indices]
-labels = labels[indices]
+    if i == 0:
+        single_batch_for_visualization_predictions = predictions
+        single_batch_for_visualization_pixel_wise_difference = pixel_wise_diff
 
-batch = torch.from_numpy(batch)
+    print("Iteration {} done".format(i))
 
-predictions = model.generate(batch)
-
-pixel_wise_diff = torch.mean(torch.abs(predictions - batch), dim=(1, 2, 3)).detach().numpy()
-
-fpr, tpr, thresholds = roc_curve(labels, pixel_wise_diff)
+fpr, tpr, thresholds = roc_curve(all_labels, all_pixel_wise_differences)
 roc_auc = auc(fpr, tpr)
 
 best_threshold = thresholds[np.argmax(tpr - fpr)]
@@ -111,19 +118,30 @@ plt.ylabel('True Positive Rate')
 plt.title('Receiver operating characteristic example')
 plt.legend(loc="lower right")
 
+if filename_roc_curve is not None:
+    plt.savefig(filename_roc_curve)
+
 print("Best Threshold: {}".format(best_threshold))
 
-labels_predicted = pixel_wise_diff > best_threshold
+single_batch_for_visualization_labels_predicted = single_batch_for_visualization_pixel_wise_difference > best_threshold
 
 fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
 
-ax1.imshow(vutils.make_grid(predictions[labels_predicted == 0], normalize=True, nrow=5).permute(2, 1, 0).numpy())
+ax1.imshow(
+    vutils.make_grid(single_batch_for_visualization_predictions[single_batch_for_visualization_labels_predicted == 0],
+                     normalize=True, nrow=5).permute(2, 1, 0).numpy())
 ax1.set_title("Reconstructed - Predicted Negative")
 
-ax2.imshow(vutils.make_grid(predictions[labels_predicted == 1], normalize=True, nrow=5).permute(2, 1, 0).numpy())
+ax2.imshow(
+    vutils.make_grid(single_batch_for_visualization_predictions[single_batch_for_visualization_labels_predicted == 1],
+                     normalize=True, nrow=5).permute(2, 1, 0).numpy())
 ax2.set_title("Reconstructed - Predicted Positive")
 
 plt.tight_layout()
+
+if filename_reconstructed_classified is not None:
+    plt.savefig(filename_reconstructed_classified)
+
 plt.show()
 
 print("Done")
