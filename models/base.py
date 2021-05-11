@@ -72,7 +72,7 @@ class BaseVAE(pl.LightningModule):
         avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
         tensorboard_logs = {'avg_val_loss': avg_loss}
 
-        if self.current_epoch % 5 == 0:
+        if self.current_epoch % 5 == 0 or self.current_epoch == (self.trainer.max_epochs - 1):
             self.sample_images()
 
         return {'val_loss': avg_loss, 'log': tensorboard_logs}

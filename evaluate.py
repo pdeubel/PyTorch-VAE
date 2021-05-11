@@ -68,14 +68,14 @@ dataloader_abnormal = DataLoader(dataset_abnormal,
 batch_normal, labels_normal = next(iter(dataloader_normal))
 batch_abnormal, labels_abnormal = next(iter(dataloader_abnormal))
 
-random_indices_normal = np.random.randint(0, 149, size=50)
-random_indices_abnormal = np.random.randint(0, 149, size=50)
+#random_indices_normal = np.random.randint(0, 149, size=50)
+#random_indices_abnormal = np.random.randint(0, 149, size=50)
 
-batch_normal = batch_normal[random_indices_normal]
-labels_normal = labels_normal[random_indices_normal]
+#batch_normal = batch_normal[random_indices_normal]
+#labels_normal = labels_normal[random_indices_normal]
 
-batch_abnormal = batch_abnormal[random_indices_abnormal]
-labels_abnormal = labels_abnormal[random_indices_abnormal]
+#batch_abnormal = batch_abnormal[random_indices_abnormal]
+#labels_abnormal = labels_abnormal[random_indices_abnormal]
 
 batch = np.concatenate([batch_normal, batch_abnormal])
 labels = np.concatenate([labels_normal, labels_abnormal])
