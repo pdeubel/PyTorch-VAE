@@ -46,8 +46,8 @@ filename_roc_curve = None
 filename_reconstructed_classified = None
 
 if args.save_plots:
-    filename_roc_curve = "roc_curve_" + args.save_plots + ".svg"
-    filename_reconstructed_classified = "reconstructed_classified_" + args.save_plots + ".svg"
+    filename_roc_curve = "roc_curve_" + args.save_plots + ".pdf"
+    filename_reconstructed_classified = "reconstructed_classified_" + args.save_plots + ".pdf"
 
 model = vae_models[config['model_params']['name']](config['exp_params'], **config['model_params'])
 model = model.load_from_checkpoint(args.checkpoint_file)
@@ -110,12 +110,11 @@ best_threshold = thresholds[np.argmax(tpr - fpr)]
 lw = 2
 plt.plot(fpr, tpr, color='darkorange',
          lw=lw, label='ROC curve (area = %0.2f)' % roc_auc)
-plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
 plt.xlim([0.0, 1.0])
 plt.ylim([0.0, 1.05])
 plt.xlabel('False Positive Rate')
 plt.ylabel('True Positive Rate')
-plt.title('Receiver operating characteristic example')
+plt.title('Receiver operating characteristic')
 plt.legend(loc="lower right")
 
 if filename_roc_curve is not None:
