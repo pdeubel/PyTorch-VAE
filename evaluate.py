@@ -46,8 +46,8 @@ filename_roc_curve = None
 filename_reconstructed_classified = None
 
 if args.save_plots:
-    filename_roc_curve = "roc_curve_" + args.save_plots
-    filename_reconstructed_classified = "reconstructed_classified_" + args.save_plots
+    filename_roc_curve = "roc_curve_" + args.save_plots + ".svg"
+    filename_reconstructed_classified = "reconstructed_classified_" + args.save_plots + ".svg"
 
 model = vae_models[config['model_params']['name']](config['exp_params'], **config['model_params'])
 model = model.load_from_checkpoint(args.checkpoint_file)
