@@ -44,7 +44,7 @@ class ConcreteCracksDataset(Dataset):
         assert len(os.listdir(self.data_dir_normal)) == len(os.listdir(self.data_dir_abnormal))
 
         self.train_index = round(len(os.listdir(self.data_dir_normal)) * self.train_split)
-        self.val_index = round(len(os.listdir(self.data_dir_normal)) * (self.train_split + self.val_split))
+        self.val_index = round(len(os.listdir(self.data_dir_normal)) * self.val_split)
 
         self.train_length = len(os.listdir(self.data_dir_normal)[:self.train_index])
         self.val_length = len(os.listdir(self.data_dir_normal)[self.train_index:self.train_index + self.val_index])
