@@ -76,10 +76,12 @@ dataloader_abnormal = DataLoader(dataset_abnormal,
                                  drop_last=True)
 
 all_labels = []
-all_pixel_wise_differences = []
+all_pixel_wise_difference_means = []
 
+single_batch_for_visualization_labels = None
 single_batch_for_visualization_predictions = None
 single_batch_for_visualization_pixel_wise_difference = None
+single_batch_for_visualization_pixel_wise_difference_mean = None
 
 for i, (normal_data, abnormal_data) in enumerate(zip(dataloader_normal, dataloader_abnormal)):
     batch_normal, labels_normal = normal_data
@@ -91,18 +93,19 @@ for i, (normal_data, abnormal_data) in enumerate(zip(dataloader_normal, dataload
     with torch.no_grad():
         predictions = model.generate(batch)
 
-    pixel_wise_diff = torch.mean(torch.abs(predictions - batch), dim=(1, 2, 3)).numpy()
+    pixel_wise_diff_mean = torch.mean(torch.abs(predictions - batch), dim=(1, 2, 3)).numpy()
 
     all_labels = np.concatenate([all_labels, labels])
-    all_pixel_wise_differences = np.concatenate([all_pixel_wise_differences, pixel_wise_diff], axis=0)
+    all_pixel_wise_difference_means = np.concatenate([all_pixel_wise_difference_means, pixel_wise_diff_mean], axis=0)
 
     if i == 0:
+        single_batch_for_visualization_labels = labels
         single_batch_for_visualization_predictions = predictions
-        single_batch_for_visualization_pixel_wise_difference = pixel_wise_diff
-
+        single_batch_for_visualization_pixel_wise_difference = torch.abs(predictions - batch)
+        single_batch_for_visualization_pixel_wise_difference_mean = pixel_wise_diff_mean
     print("Iteration {} done".format(i))
 
-fpr, tpr, thresholds = roc_curve(all_labels, all_pixel_wise_differences)
+fpr, tpr, thresholds = roc_curve(all_labels, all_pixel_wise_difference_means)
 roc_auc = auc(fpr, tpr)
 
 best_threshold = thresholds[np.argmax(tpr - fpr)]
@@ -122,9 +125,8 @@ if filename_roc_curve is not None:
 
 print("Best Threshold: {}".format(best_threshold))
 
-single_batch_for_visualization_labels_predicted = single_batch_for_visualization_pixel_wise_difference > best_threshold
-
-fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
+single_batch_for_visualization_labels_predicted = single_batch_for_visualization_pixel_wise_difference_mean > best_threshold
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(nrows=4, ncols=1)
 
 ax1.imshow(
     vutils.make_grid(single_batch_for_visualization_predictions[single_batch_for_visualization_labels_predicted == 0],
@@ -132,9 +134,19 @@ ax1.imshow(
 ax1.set_title("Reconstructed - Predicted Negative")
 
 ax2.imshow(
+    vutils.make_grid(single_batch_for_visualization_pixel_wise_difference[single_batch_for_visualization_labels_predicted == 0],
+                     normalize=True, nrow=5).permute(2, 1, 0).numpy())
+ax2.set_title("Pixelwise difference - Predicted Negative")
+
+ax3.imshow(
     vutils.make_grid(single_batch_for_visualization_predictions[single_batch_for_visualization_labels_predicted == 1],
                      normalize=True, nrow=5).permute(2, 1, 0).numpy())
-ax2.set_title("Reconstructed - Predicted Positive")
+ax3.set_title("Reconstructed - Predicted Positive")
+
+ax4.imshow(
+    vutils.make_grid(single_batch_for_visualization_pixel_wise_difference[single_batch_for_visualization_labels_predicted == 1],
+                     normalize=True, nrow=5).permute(2, 1, 0).numpy())
+ax4.set_title("Pixelwise difference - Predicted Positive")
 
 plt.tight_layout()
 
@@ -142,5 +154,4 @@ if filename_reconstructed_classified is not None:
     plt.savefig(filename_reconstructed_classified)
 
 plt.show()
-
 print("Done")
