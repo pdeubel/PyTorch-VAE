@@ -10,6 +10,7 @@ from torchvision import transforms
 from torchvision.datasets import CelebA
 
 from datasets.concrete_cracks import ConcreteCracksDataset
+from datasets.sdnet2018 import SDNet2018
 from models.types_ import *
 
 
@@ -170,6 +171,11 @@ class BaseVAE(pl.LightningModule):
                                             split="train",
                                             abnormal_data=False,
                                             transform=transform)
+        elif self.params['dataset'] == "SDNET2018":
+            dataset = SDNet2018(root_dir=self.params['data_path'],
+                                split="train",
+                                abnormal_data=False,
+                                transform=transform)
         else:
             raise ValueError('Undefined dataset type')
 
@@ -199,6 +205,15 @@ class BaseVAE(pl.LightningModule):
                                                 batch_size=144,
                                                 shuffle=True,
                                                 drop_last=True)
+        elif self.params['dataset'] == 'SDNET2018':
+            dataset = SDNet2018(root_dir=self.params['data_path'],
+                                split="val",
+                                abnormal_data=False,
+                                transform=transform)
+            self.sample_dataloader = DataLoader(dataset,
+                                                batch_size=144,
+                                                shuffle=True,
+                                                drop_last=True)
         else:
             raise ValueError('Undefined dataset type')
 
@@ -217,7 +232,7 @@ class BaseVAE(pl.LightningModule):
                                             transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
-        elif self.params['dataset'] == 'concrete-cracks':
+        elif self.params['dataset'] == 'concrete-cracks' or self.params['dataset'] == 'SDNET2018':
             transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])

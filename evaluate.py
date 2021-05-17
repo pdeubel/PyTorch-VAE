@@ -55,15 +55,29 @@ model.eval()
 
 transform = model.data_transforms()
 
-dataset_normal = ConcreteCracksDataset(root_dir=config['exp_params']['data_path'],
-                                       split="val",
-                                       abnormal_data=False,
-                                       transform=transform)
+if ['dataset'] == 'concrete-cracks':
+    dataset_normal = ConcreteCracksDataset(root_dir=config['exp_params']['data_path'],
+                                           split="val",
+                                           abnormal_data=False,
+                                           transform=transform)
 
-dataset_abnormal = ConcreteCracksDataset(root_dir=config['exp_params']['data_path'],
-                                         split="val",
-                                         abnormal_data=True,
-                                         transform=transform)
+    dataset_abnormal = ConcreteCracksDataset(root_dir=config['exp_params']['data_path'],
+                                             split="val",
+                                             abnormal_data=True,
+                                             transform=transform)
+elif config['exp_params']['dataset'] == 'SDNET2018':
+    dataset_normal = SDNet2018(root_dir=config['exp_params']['data_path'],
+                               split="val",
+                               abnormal_data=False,
+                               transform=transform)
+
+    dataset_abnormal = SDNet2018(root_dir=config['exp_params']['data_path'],
+                                 split="val",
+                                 abnormal_data=True,
+                                 transform=transform)
+else:
+    raise RuntimeError(
+        "The dataset '{}' is not supported in the evaluate.py script".format(config['exp_params']['dataset']))
 
 dataloader_normal = DataLoader(dataset_normal,
                                batch_size=150,
@@ -134,8 +148,9 @@ ax1.imshow(
 ax1.set_title("Reconstructed - Predicted Negative")
 
 ax2.imshow(
-    vutils.make_grid(single_batch_for_visualization_pixel_wise_difference[single_batch_for_visualization_labels_predicted == 0],
-                     normalize=True, nrow=5).permute(2, 1, 0).numpy())
+    vutils.make_grid(
+        single_batch_for_visualization_pixel_wise_difference[single_batch_for_visualization_labels_predicted == 0],
+        normalize=True, nrow=5).permute(2, 1, 0).numpy())
 ax2.set_title("Pixelwise difference - Predicted Negative")
 
 ax3.imshow(
@@ -144,8 +159,9 @@ ax3.imshow(
 ax3.set_title("Reconstructed - Predicted Positive")
 
 ax4.imshow(
-    vutils.make_grid(single_batch_for_visualization_pixel_wise_difference[single_batch_for_visualization_labels_predicted == 1],
-                     normalize=True, nrow=5).permute(2, 1, 0).numpy())
+    vutils.make_grid(
+        single_batch_for_visualization_pixel_wise_difference[single_batch_for_visualization_labels_predicted == 1],
+        normalize=True, nrow=5).permute(2, 1, 0).numpy())
 ax4.set_title("Pixelwise difference - Predicted Positive")
 
 plt.tight_layout()
