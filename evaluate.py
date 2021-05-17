@@ -55,7 +55,7 @@ model.eval()
 
 transform = model.data_transforms()
 
-if ['dataset'] == 'concrete-cracks':
+if config['exp_params']['dataset'] == 'concrete-cracks':
     dataset_normal = ConcreteCracksDataset(root_dir=config['exp_params']['data_path'],
                                            split="val",
                                            abnormal_data=False,
