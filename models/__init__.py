@@ -1,5 +1,6 @@
 from .base import *
 from .vanilla_vae import *
+from .vanilla_vae_second import *
 from .gamma_vae import *
 from .beta_vae import *
 from .wae_mmd import *
@@ -49,6 +50,7 @@ vae_models = {'HVAE':HVAE,
               'FactorVAE':FactorVAE,
               'LogCoshVAE':LogCoshVAE,
               'VanillaVAE':VanillaVAE,
+              'VanillaVAE_second':VanillaVAE_second,
               'ConditionalVAE':ConditionalVAE,
               'CategoricalVAE':CategoricalVAE,
               'VanillaVAEUNet':VanillaVAEUNet}
