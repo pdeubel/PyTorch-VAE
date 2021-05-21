@@ -6,7 +6,7 @@ from models import BaseVAE
 from .types_ import *
 
 
-class VanillaVAE_exp1(BaseVAE):
+class VanillaVAE_second(BaseVAE):
 
     def __init__(self,
                  params: dict,
