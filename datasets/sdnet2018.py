@@ -1,6 +1,5 @@
 import os
 
-import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -8,13 +7,20 @@ from torch.utils.data import Dataset
 
 class SDNet2018(Dataset):
     """
+    SDNet2018 dataset which contains images of cracked and non-cracked concrete bridge decks, walls and pavements.
 
+    Maguire, M., Dorafshan, S., & Thomas, R. J. (2018). SDNET2018: A concrete crack image dataset for machine learning
+     applications. Utah State University. https://doi.org/10.15142/T3TD19
     """
 
     def __init__(self, root_dir, split: str = "train", abnormal_data: bool = False, transform=None):
         """
         Args:
-            root_dir (string): Directory with all the images.
+            root_dir (string): Directory with all the images, it assumes 'D', 'P' and 'W' as subfolders and these in
+                turn contain subfolders with cracked and non-cracked images
+            split (string): 'train', 'val' or 'test'
+            abnormal_data (bool, optional): If this is true, the abnormal data is returned, i.e. images with cracks.
+                Otherwise non-cracked images are returned.
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
@@ -37,134 +43,100 @@ class SDNet2018(Dataset):
         self.abnormal_data = abnormal_data
 
         self.data_directories_normal = [
-            [os.path.join(self.root_dir, "D", "UD", _dir) for _dir in os.listdir(os.path.join(self.root_dir, "D", "UD"))],
-            [os.path.join(self.root_dir, "P", "UP", _dir) for _dir in os.listdir(os.path.join(self.root_dir, "P", "UP"))],
-            [os.path.join(self.root_dir, "W", "UW", _dir) for _dir in os.listdir(os.path.join(self.root_dir, "W", "UW"))]
+            [os.path.join(self.root_dir, "D", "UD", _dir) for _dir in
+             os.listdir(os.path.join(self.root_dir, "D", "UD"))],
+            [os.path.join(self.root_dir, "P", "UP", _dir) for _dir in
+             os.listdir(os.path.join(self.root_dir, "P", "UP"))],
+            [os.path.join(self.root_dir, "W", "UW", _dir) for _dir in
+             os.listdir(os.path.join(self.root_dir, "W", "UW"))]
         ]
 
         self.data_directories_abnormal = [
-            [os.path.join(self.root_dir, "D", "CD", _dir) for _dir in os.listdir(os.path.join(self.root_dir, "D", "CD"))],
-            [os.path.join(self.root_dir, "P", "CP", _dir) for _dir in os.listdir(os.path.join(self.root_dir, "P", "CP"))],
-            [os.path.join(self.root_dir, "W", "CW", _dir) for _dir in os.listdir(os.path.join(self.root_dir, "W", "CW"))]
+            [os.path.join(self.root_dir, "D", "CD", _dir) for _dir in
+             os.listdir(os.path.join(self.root_dir, "D", "CD"))],
+            [os.path.join(self.root_dir, "P", "CP", _dir) for _dir in
+             os.listdir(os.path.join(self.root_dir, "P", "CP"))],
+            [os.path.join(self.root_dir, "W", "CW", _dir) for _dir in
+             os.listdir(os.path.join(self.root_dir, "W", "CW"))]
         ]
 
-        # Make indices for each subdirectory of the dataset. Doing only one indice on all the subdirectories together
-        # would result in a behavior that the testing dataset is always at the back (so for example the last x percent
-        # But then all the testing would come from one category (i.e. walls, "W") and that is not desired
-        self.train_indices_normal = [round(len(_dir) * self.train_split) for _dir in self.data_directories_normal]
-        self.val_indices_normal = [round(len(_dir) * self.val_split) for _dir in self.data_directories_normal]
-        self.test_indices_normal = [len(_dir) for _dir in self.data_directories_normal] - np.sum([self.train_indices_normal, self.val_indices_normal], axis=0)
+        self.train_data_normal, self.val_data_normal, self.test_data_normal = self.create_splits(
+            self.data_directories_normal)
 
-        self.train_length_normal = sum(self.train_indices_normal)
-        self.val_length_normal = sum(self.val_indices_normal)
-        self.test_length_normal = sum([len(_dir) for _dir in self.data_directories_normal]) - self.train_length_normal - self.val_length_normal
+        self.train_data_abnormal, self.val_data_abnormal, self.test_data_abnormal = self.create_splits(
+            self.data_directories_abnormal)
 
-        assert (self.train_length_normal + self.val_length_normal + self.test_length_normal ==
-                sum(len(_dir) for _dir in self.data_directories_normal))
+        self.train_data_normal_length = len(self.train_data_normal)
+        self.val_data_normal_length = len(self.val_data_normal)
+        self.test_data_normal_length = len(self.test_data_normal)
 
-        # First create the index map for the normal (i.e. no cracks) training data
-        # This index map will contain keys in range(0, self.train_length_normal) and tuples as values that first
-        # choose which subdirectory of the data is sued and then which index in this subdirectory is used.
-        # This is done for validation and testing sets and also for the abnormal data
-        temp_index_map_1 = {i: (0, i) for i in range(self.train_indices_normal[0])}
-        temp_index_map_2 = {self.train_indices_normal[0] + i: (1, i) for i in range(self.train_indices_normal[1])}
-        temp_index_map_3 = {self.train_indices_normal[0] + self.train_indices_normal[1] + i: (2, i) for i in range(self.train_indices_normal[2])}
+        self.train_data_abnormal_length = len(self.train_data_abnormal)
+        self.val_data_abnormal_length = len(self.val_data_abnormal)
+        self.test_data_abnormal_length = len(self.test_data_abnormal)
 
-        self.index_map_train_normal = {**temp_index_map_1, **temp_index_map_2, **temp_index_map_3}
+    def create_splits(self, data_directories: list):
+        """
+        Create train, val and test splits from the provided data_directory. This expects that data_directories is a list
+        of subfolders and each subfolder contains direct paths to the image files. This way the train, val and test
+        splits can be done per subfolder.
 
-        temp_index_map_1 = {i: (0, self.train_indices_normal[0] + i) for i in range(self.val_indices_normal[0])}
-        temp_index_map_2 = {self.val_indices_normal[0] + i: (1, self.train_indices_normal[1] + i) for i in range(self.val_indices_normal[1])}
-        temp_index_map_3 = {self.val_indices_normal[0] + self.val_indices_normal[1] + i: (2, self.train_indices_normal[2] + i) for i in range(self.val_indices_normal[2])}
+        Doing splits on all subfolders concatenated would result in the test set containing always the last portion of
+        the concatenated list. This is not desired as then it would contain images of only one 'class' (i.e. bridge
+        decks, walls or pavements). Also the other splits would potentially not see data from this 'class'.
+        """
+        train_split = []
+        val_split = []
+        test_split = []
 
-        self.index_map_val_normal = {**temp_index_map_1, **temp_index_map_2, **temp_index_map_3}
+        for sub_dir in data_directories:
+            train_index = round(len(sub_dir) * self.train_split)
+            val_index = round(len(sub_dir) * self.val_split)
 
-        temp_index_map_1 = {i: (0, self.train_indices_normal[0] + self.val_indices_normal[0] + i) for i in range(self.test_indices_normal[0])}
-        temp_index_map_2 = {self.test_indices_normal[0] + i: (1, self.train_indices_normal[1] + self.val_indices_normal[1] + i) for i in range(self.test_indices_normal[1])}
-        temp_index_map_3 = {self.test_indices_normal[0] + self.test_indices_normal[1] + i: (2, self.train_indices_normal[2] + self.val_indices_normal[2] + i) for i in range(self.test_indices_normal[2])}
+            train_split += sub_dir[:train_index]
+            val_split += sub_dir[train_index:train_index + val_index]
+            test_split += sub_dir[train_index + val_index:]
 
-        self.index_map_test_normal = {**temp_index_map_1, **temp_index_map_2, **temp_index_map_3}
-
-        # Now create index maps for the abnormal data
-        self.train_indices_abnormal = [round(len(_dir) * self.train_split) for _dir in self.data_directories_abnormal]
-        self.val_indices_abnormal = [round(len(_dir) * self.val_split) for _dir in self.data_directories_abnormal]
-        self.test_indices_abnormal = [len(_dir) for _dir in self.data_directories_abnormal] - np.sum([self.train_indices_abnormal, self.val_indices_abnormal], axis=0)
-
-        self.train_length_abnormal = sum(self.train_indices_abnormal)
-        self.val_length_abnormal = sum(self.val_indices_abnormal)
-        self.test_length_abnormal = sum([len(_dir) for _dir in self.data_directories_abnormal]) - self.train_length_abnormal - self.val_length_abnormal
-
-        assert (self.train_length_abnormal + self.val_length_abnormal + self.test_length_abnormal ==
-                sum(len(_dir) for _dir in self.data_directories_abnormal))
-
-        temp_index_map_1 = {i: (0, i) for i in range(self.train_indices_abnormal[0])}
-        temp_index_map_2 = {self.train_indices_abnormal[0] + i: (1, i) for i in range(self.train_indices_abnormal[1])}
-        temp_index_map_3 = {self.train_indices_abnormal[0] + self.train_indices_abnormal[1] + i: (2, i) for i in range(self.train_indices_abnormal[2])}
-
-        self.index_map_train_abnormal = {**temp_index_map_1, **temp_index_map_2, **temp_index_map_3}
-
-        temp_index_map_1 = {i: (0, self.train_indices_abnormal[0] + i) for i in range(self.val_indices_abnormal[0])}
-        temp_index_map_2 = {self.val_indices_abnormal[0] + i: (1, self.train_indices_abnormal[1] + i) for i in range(self.val_indices_abnormal[1])}
-        temp_index_map_3 = {self.val_indices_abnormal[0] + self.val_indices_abnormal[1] + i: (2, self.train_indices_abnormal[2] + i) for i in range(self.val_indices_abnormal[2])}
-
-        self.index_map_val_abnormal = {**temp_index_map_1, **temp_index_map_2, **temp_index_map_3}
-
-        temp_index_map_1 = {i: (0, self.train_indices_abnormal[0] + self.val_indices_abnormal[0] + i) for i in range(self.test_indices_abnormal[0])}
-        temp_index_map_2 = {self.test_indices_abnormal[0] + i: (1, self.train_indices_abnormal[1] + self.val_indices_abnormal[1] + i) for i in range(self.test_indices_abnormal[1])}
-        temp_index_map_3 = {self.test_indices_abnormal[0] + self.test_indices_abnormal[1] + i: (2, self.train_indices_abnormal[2] + self.val_indices_abnormal[2] + i) for i in range(self.test_indices_abnormal[2])}
-
-        self.index_map_test_abnormal = {**temp_index_map_1, **temp_index_map_2, **temp_index_map_3}
+        return train_split, val_split, test_split
 
     def __len__(self):
-        if self.split == "train":
-            if not self.abnormal_data:
-                return self.train_length_normal
+        if not self.abnormal_data:
+            if self.split == "train":
+                return self.train_data_normal_length
+            elif self.split == "val":
+                return self.val_data_normal_length
             else:
-                return self.train_length_abnormal
-        elif self.split == "val":
-            if not self.abnormal_data:
-                return self.val_length_normal
-            else:
-                return self.val_length_abnormal
+                return self.test_data_normal_length
         else:
-            if not self.abnormal_data:
-                return self.test_length_normal
+            if self.split == "train":
+                return self.train_data_abnormal_length
+            elif self.split == "val":
+                return self.val_data_abnormal_length
             else:
-                return self.test_length_abnormal
+                return self.test_data_abnormal_length
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx) or isinstance(idx, list):
-            raise RuntimeError("SDNet2018 Dataset was accessed with a list of indices, not sure if this works. Aborting")
-
-        if self.split == "train":
-            if not self.abnormal_data:
-                label = 0
-                index_map = self.index_map_train_normal
-            else:
-                label = 1
-                index_map = self.index_map_train_abnormal
-        elif self.split == "val":
-            if not self.abnormal_data:
-                label = 0
-                index_map = self.index_map_val_normal
-            else:
-                label = 1
-                index_map = self.index_map_val_abnormal
-        else:
-            if not self.abnormal_data:
-                label = 0
-                index_map = self.index_map_test_normal
-            else:
-                index_map = self.index_map_test_abnormal
-                label = 1
-
-        dataset_idx, idx_in_dataset = index_map[idx]
+            raise RuntimeError(
+                "SDNet2018 Dataset was accessed with a list of indices, not sure if this works. Aborting")
 
         if not self.abnormal_data:
-            image_path = self.data_directories_normal[dataset_idx][idx_in_dataset]
+            label = 0
+            if self.split == "train":
+                data = self.train_data_normal
+            elif self.split == "val":
+                data = self.val_data_normal
+            else:
+                data = self.test_data_normal
         else:
-            image_path = self.data_directories_abnormal[dataset_idx][idx_in_dataset]
+            label = 1
+            if self.split == "train":
+                data = self.train_data_abnormal
+            elif self.split == "val":
+                data = self.val_data_abnormal
+            else:
+                data = self.test_data_abnormal
 
-        img = Image.open(image_path)
+        img = Image.open(data[idx])
 
         if self.transform:
             img = self.transform(img)
