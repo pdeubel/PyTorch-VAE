@@ -22,6 +22,13 @@ class BaseVAE(pl.LightningModule):
         self.params = params
         self.curr_device = None
 
+        try:
+            num_workers = params["dataloader_workers"]
+        except KeyError:
+            num_workers = 1
+
+        self.additional_dataloader_args = {'num_workers': num_workers, 'pin_memory': True}
+
     def encode(self, input: Tensor) -> List[Tensor]:
         raise NotImplementedError
 
@@ -180,42 +187,39 @@ class BaseVAE(pl.LightningModule):
             raise ValueError('Undefined dataset type')
 
         self.num_train_imgs = len(dataset)
+
         return DataLoader(dataset,
                           batch_size=self.params['batch_size'],
                           shuffle=True,
-                          drop_last=True)
+                          drop_last=True,
+                          **self.additional_dataloader_args)
 
     def val_dataloader(self):
         transform = self.data_transforms()
 
         if self.params['dataset'] == 'celeba':
-            self.sample_dataloader = DataLoader(CelebA(root=self.params['data_path'],
-                                                       split="test",
-                                                       transform=transform,
-                                                       download=False),
-                                                batch_size=144,
-                                                shuffle=True,
-                                                drop_last=True)
+            dataset = CelebA(root=self.params['data_path'],
+                             split="test",
+                             transform=transform,
+                             download=False)
         elif self.params['dataset'] == 'concrete-cracks':
             dataset = ConcreteCracksDataset(root_dir=self.params['data_path'],
                                             split="val",
                                             abnormal_data=False,
                                             transform=transform)
-            self.sample_dataloader = DataLoader(dataset,
-                                                batch_size=144,
-                                                shuffle=True,
-                                                drop_last=True)
         elif self.params['dataset'] == 'SDNET2018':
             dataset = SDNet2018(root_dir=self.params['data_path'],
                                 split="val",
                                 abnormal_data=False,
                                 transform=transform)
-            self.sample_dataloader = DataLoader(dataset,
-                                                batch_size=144,
-                                                shuffle=True,
-                                                drop_last=True)
         else:
             raise ValueError('Undefined dataset type')
+
+        self.sample_dataloader = DataLoader(dataset,
+                                            batch_size=self.params['batch_size'],
+                                            shuffle=True,
+                                            drop_last=True,
+                                            **self.additional_dataloader_args)
 
         self.num_val_imgs = len(self.sample_dataloader)
 
