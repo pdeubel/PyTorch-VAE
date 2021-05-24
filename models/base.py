@@ -236,10 +236,13 @@ class BaseVAE(pl.LightningModule):
                                             transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
-        elif self.params['dataset'] == 'concrete-cracks' or self.params['dataset'] == 'SDNET2018':
+        elif self.params['dataset'] == 'concrete-cracks':
             transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
+        elif self.params['dataset'] == 'SDNET2018':
+            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
+                                            transforms.ToTensor()])
         else:
             raise ValueError('Undefined dataset type')
         return transform
