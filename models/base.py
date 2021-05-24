@@ -243,8 +243,7 @@ class BaseVAE(pl.LightningModule):
         elif self.params['dataset'] == 'SDNET2018':
             transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
-                                            # Mean and Std from the training set with the normal data (no abnormal)
-                                            transforms.Normalize([0.6378, 0.6337, 0.6248], [0.0593, 0.0590, 0.0579])])
+                                            SetRange])
         else:
             raise ValueError('Undefined dataset type')
         return transform
