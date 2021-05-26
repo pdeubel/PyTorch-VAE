@@ -1,15 +1,16 @@
 import argparse
-import os
 
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 import torch.backends.cudnn as cudnn
+import torchvision.utils as vutils
 import yaml
 from PIL import Image
 from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TestTubeLogger
-from torchsummary import summary
 
-from models import *
+from models import vae_models
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
 parser.add_argument('--config', '-c',
@@ -25,9 +26,10 @@ parser.add_argument('--load', '-l',
 parser.add_argument('--sample', '-s',
                     action='store_true',
                     help='Reconstruct image and plot it')
-parser.add_argument('--anomaly', '-a',
-                    action='store_true',
-                    help='Choose random image with crack and feed into VAE')
+parser.add_argument('--reconstruct', '-r',
+                    metavar='FILE',
+                    help='Provide a file that the model shall reconstruct and plot',
+                    default=None)
 
 args = parser.parse_args()
 with open(args.filename, 'r') as file:
@@ -57,41 +59,37 @@ if args.checkpoint_file is not None:
     # For debugging
     # model.params["data_path"] = "/home/pdeubel/PycharmProjects/data/Concrete-Crack-Images"
 
-# TODO Maybe delete this if not needed anymore. was used to create own ModelCheckpoint callback
-# Call this explicitly otherwise the version parameter is not set of the logger which is required for the file path
-# tt_logger.save()
-# checkpoint_file_path = os.path.join(tt_logger.save_dir,
-#                                     tt_logger.name,
-#                                     f'version_{tt_logger.version}',
-#                                     "checkpoints")
-# callbacks=ModelCheckpoint(dirpath=checkpoint_file_path, save_top_k=-1, period=1),
-
 if args.sample:
     # Initialize dataloader from which is sampled
     model.val_dataloader()
     model.eval()
-    model.sample_images(save=False, display=True)
+    model.sample_images()
 
     print("Sampled a batch of images and plotted them.")
-elif args.anomaly:
-
-    #dir_path = "/home/pdeubel/PycharmProjects/data/Concrete-Crack-Images/Positive"
-    #img_file = np.random.choice(os.listdir(dir_path))
-
-    dir_path = "/home/pdeubel/Pictures/"
-    img_file = "butterfly.jpg"
-
-    anomaly_img = Image.open(os.path.join(dir_path, img_file))
-    anomaly_img: torch.Tensor = model.data_transforms()(anomaly_img).unsqueeze(0)
-
+elif args.reconstruct is not None:
     model.eval()
-    output = model.generate(anomaly_img)
 
-    show_images = torch.cat((anomaly_img, output), dim=0)
+    original_img = Image.open(args.reconstruct)
+    original_img: torch.Tensor = model.data_transforms()(original_img).unsqueeze(0)
 
-    plt.imshow(vutils.make_grid(show_images, normalize=True, nrow=1).permute(2, 1, 0).numpy())
-    plt.title("Reconstructed anomaly")
+    reconstructed_img = model.generate(original_img)
+
+    pixelwise_difference = torch.abs(reconstructed_img - original_img)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=4)
+
+    ax1.imshow(vutils.make_grid(original_img, normalize=True, nrow=1).permute(2, 1, 0).numpy())
+    ax1.set_title("Original Image")
+
+    ax2.imshow(vutils.make_grid(reconstructed_img, normalize=True, nrow=1).permute(2, 1, 0).numpy())
+    ax2.set_title("Reconstructed Image")
+
+    ax3.imshow(vutils.make_grid(pixelwise_difference, normalize=True, nrow=1).permute(2, 1, 0).numpy())
+    ax3.set_title("Pixelwise Difference")
+
     plt.show()
+
+    print("Done")
 else:
     runner = Trainer(default_root_dir=f"{tt_logger.save_dir}",
                      min_epochs=1,
