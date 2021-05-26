@@ -96,7 +96,7 @@ class BaseVAE(pl.LightningModule):
 
         for batch, labels in dataloader:
             # If model is on GPU moving the data to GPU as well is required, otherwise an error is thrown
-            batch.to(self.curr_device)
+            batch = batch.to(self.curr_device)
 
             predictions = self.generate(batch)
 
