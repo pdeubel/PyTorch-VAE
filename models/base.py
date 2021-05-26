@@ -95,9 +95,12 @@ class BaseVAE(pl.LightningModule):
         all_pixelwise_differences = []
 
         for batch, labels in dataloader:
+            # If model is on GPU moving the data to GPU as well is required, otherwise an error is thrown
+            batch.to(self.curr_device)
+
             predictions = self.generate(batch)
 
-            pixelwise_difference = torch.mean(torch.abs(predictions - batch), dim=(1, 2, 3))
+            pixelwise_difference = torch.mean(torch.abs(predictions - batch), dim=(1, 2, 3)).cpu()
 
             all_labels = np.concatenate([all_labels, labels])
             all_pixelwise_differences = np.concatenate([all_pixelwise_differences, pixelwise_difference], axis=0)
