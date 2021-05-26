@@ -9,6 +9,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import CelebA
+from torchvision.utils import make_grid
 
 from datasets.concrete_cracks import ConcreteCracksDataset
 from datasets.sdnet2018 import SDNet2018
@@ -138,13 +139,20 @@ class BaseVAE(pl.LightningModule):
         test_input, test_label = next(iter(self.sample_dataloader))
         test_input = test_input.to(self.curr_device)
         test_label = test_label.to(self.curr_device)
+
         recons = self.generate(test_input, labels=test_label)
 
-        self.logger.experiment.add_images("reconstructions", recons, global_step=self.current_epoch)
+        self.logger.experiment.add_images("reconstructions",
+                                          make_grid(recons, normalize=True, nrow=1),  # Use make_grid to normalize
+                                          global_step=self.current_epoch,
+                                          dataformats='CWH')  # make_grid seems to return channel x width x height
 
         try:
             samples = self.sample(144, self.curr_device, labels=test_label)
-            self.logger.experiment.add_images("samples", samples, self.current_epoch)
+            self.logger.experiment.add_images("samples",
+                                              make_grid(samples, normalize=True, nrow=12),
+                                              global_step=self.current_epoch,
+                                              dataformats='CWH')
         except:
             pass
 
