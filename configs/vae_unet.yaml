@@ -5,19 +5,22 @@ model_params:
   hidden_dims: [32, 64, 128, 256, 256, 512]
 
 exp_params:
-  dataset: concrete-cracks
-  data_path: "/cvhci/data/construction/Concrete-Cracks"
+  # dataset: concrete-cracks
+  # data_path: "/cvhci/data/construction/Concrete-Cracks"
+  dataset: SDNET2018
+  data_path: "/cvhci/data/construction/SDNET2018"
   img_size: 128
   batch_size: 144 # Better to have a square number
   LR: 0.005
   weight_decay: 0.0
   scheduler_gamma: 0.95
+  dataloader_workers: 4
 
 trainer_params:
-  gpus: [2]
+  gpus: [3]
   max_epochs: 10
 
 logging_params:
   save_dir: "/cvhci/temp/p21g3/PyTorch-VAE/logs/"
   name: "VanillaVAEUNet"
-  manual_seed: 42
+  manual_seed: 100
