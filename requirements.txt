@@ -9,3 +9,4 @@ torchnet
 torchsummary
 torchvision
 matplotlib
+scikit-learn
