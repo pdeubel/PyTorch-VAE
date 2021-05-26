@@ -13,3 +13,9 @@ Run.ipynb
 .idea/
 
 venv/
+
+# Ignore local configs, makes it easier to have local paths to the dataset (for debugging etc.)
+configs/local_*
+
+# Testing scripts
+test.py
