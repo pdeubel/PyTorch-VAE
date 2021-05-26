@@ -14,10 +14,17 @@ Idea of this script:
 
 import argparse
 
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torchvision.utils as vutils
 import yaml
 from sklearn.metrics import roc_curve, auc
+from torch.utils.data import DataLoader
 
-from models import *
+from datasets.concrete_cracks import ConcreteCracksDataset
+from datasets.sdnet2018 import SDNet2018
+from models import vae_models
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
 parser.add_argument('--config', '-c',

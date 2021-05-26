@@ -12,7 +12,7 @@ from torchvision.datasets import CelebA
 
 from datasets.concrete_cracks import ConcreteCracksDataset
 from datasets.sdnet2018 import SDNet2018
-from models.types_ import *
+from models.types_ import Any, List, Tensor
 
 
 class BaseVAE(pl.LightningModule):
@@ -60,7 +60,6 @@ class BaseVAE(pl.LightningModule):
                                         optimizer_idx=optimizer_idx,
                                         batch_idx=batch_idx)
 
-        # TODO this is deprecated
         self.logger.experiment.log({key: val.item() for key, val in train_loss.items()})
 
         return train_loss
