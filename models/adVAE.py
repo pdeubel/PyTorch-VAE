@@ -3,8 +3,10 @@ from typing import List, Any
 import pytorch_lightning as pl
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from models import BaseVAE
+from models.types_ import Tensor
 
 
 class Encoder(pl.LightningModule):
@@ -149,7 +151,7 @@ class adVAE(BaseVAE):
 
         self.save_hyperparameters()
 
-    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
+    def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         """
         Reparameterization trick to sample from N(mu, var) from
         N(0,1).
@@ -157,26 +159,138 @@ class adVAE(BaseVAE):
         :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
         :return: (Tensor) [B x D]
         """
-        std = torch.exp(0.5 * logvar)
+        std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
         return eps * std + mu
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Training Step 1
-        self.encoder.freeze()
+    def forward(self, x: torch.Tensor, optimizer_idx=0) -> dict:
+        if optimizer_idx == 0:
+            # self.encoder.freeze()
+            # Training Step 1
+            self.mu, self.log_var = self.encoder(x)
+            self.z = self.reparameterize(self.mu, self.log_var)
 
-        mu, log_var = self.encoder(x)
-        z = self.reparameterize(mu, log_var)
+            mu_T, log_var_T = self.transformer(self.z)
+            self.z_T = self.reparameterize(mu_T, log_var_T)
 
-        # TODO sigma or log_var
-        z_T_mu, z_T_sigma = self.transformer(z)
-        z_T = self.reparameterize(z_T_mu, z_T_sigma)
+            x_r = self.decoder(self.z)
+            x_T_r = self.decoder(self.z_T)
 
-        x_r = self.decoder(z)
-        x_T_r = self.decoder(z_T)
+            mu_r, log_var_r = self.encoder(x_r)
+            mu_T_r, log_var_T_r = self.encoder(x_T_r)
 
-        mu_r, log_var_r = self.encoder(x_r)
-        mu_T_r, sigma_T_r = self.encoder(x_T_r)
+            # self.encoder.unfreeze()
+
+            return {"x": x,
+                    "x_r": x_r,
+                    "x_T_r": x_T_r,
+                    "mu": self.mu,
+                    "log_var": self.log_var,
+                    "mu_T": mu_T,
+                    "log_var_T": log_var_T,
+                    "mu_r": mu_r,
+                    "log_var_r": log_var_r,
+                    "mu_T_r": mu_T_r,
+                    "log_var_T_r": log_var_T_r}
+
+        elif optimizer_idx == 1:
+
+            # Training Step 2
+            # self.decoder.freeze()
+            # self.transformer.freeze()
+
+            # TODO Could be that x_r and x_T_r need to be detached
+            x_r = self.decoder(self.z)
+            x_T_r = self.decoder(self.z_T)
+
+            mu_r, log_var_r = self.encoder(x_r)
+            mu_T_r, log_var_T_r = self.encoder(x_T_r)
+
+            # self.decoder.unfreeze()
+            # self.transformer.unfreeze()
+
+            # Loss Step 2
+            return {"x": x,
+                    "x_r": x_r,
+                    "mu": self.mu,
+                    "log_var": self.log_var,
+                    "mu_r": mu_r,
+                    "log_var_r": log_var_r,
+                    "mu_T_r": mu_T_r,
+                    "log_var_T_r": log_var_T_r}
+
+    def loss_function(self,
+                      results,
+                      **kwargs) -> dict:
+        """
+        Computes the VAE loss function.
+        KL(N(\mu, \sigma), N(0, 1)) = \log \frac{1}{\sigma} + \frac{\sigma^2 + \mu^2}{2} - \frac{1}{2}
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
+        optimizer_idx = kwargs['optimizer_idx']
+
+        if optimizer_idx == 0:
+            # Update Generator and Transformer
+            x = results["x"]
+            x_r = results["x_r"]
+            x_T_r = results["x_T_r"]
+            mu = results["mu"]
+            log_var = results["log_var"]
+            mu_T = results["mu_T"]
+            log_var_T = results["log_var_T"]
+            mu_r = results["mu_r"]
+            log_var_r = results["log_var_r"]
+            mu_T_r = results["mu_T_r"]
+            log_var_T_r = results["log_var_T_r"]
+
+            L_G_z_term_1 = F.mse_loss(x, x_r)
+            L_G_z_term_2 = torch.mean(-0.5 * torch.sum(1 + log_var_r - mu_r ** 2 - log_var_r.exp(), dim=1), dim=0)
+            L_G_z = L_G_z_term_1 + self.params["gamma"] * L_G_z_term_2
+
+            L_G_z_T_term_1 = F.relu(self.params["m_x"] - F.mse_loss(x_r, x_T_r))
+            L_G_z_T_term_2 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
+            L_G_z_T = L_G_z_T_term_1 + self.params["gamma"] * L_G_z_T_term_2
+
+            L_G = L_G_z + L_G_z_T
+
+            L_T_term_1 = 0.5 * log_var_T - 0.5 * log_var
+            L_T_term_2 = (log_var + torch.square((0.5 * mu).exp() - (0.5 * mu_T).exp())) / (2 * log_var_T)
+            L_T_term_3 = -0.5
+            L_T = torch.mean(torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1), dim=0)
+
+            loss = L_T + self.params["gamma"] * L_G
+
+            return {"loss": loss}
+        elif optimizer_idx == 1:
+            # Update Encoder
+            x = results["x"]
+            x_r = results["x_r"]
+            mu = results["mu"]
+            log_var = results["log_var"]
+            mu_r = results["mu_r"]
+            log_var_r = results["log_var_r"]
+            mu_T_r = results["mu_T_r"]
+            log_var_T_r = results["log_var_T_r"]
+
+            L_E_term_1 = F.mse_loss(x, x_r)
+            L_E_term_2 = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
+            L_E_term_3 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_r - mu_r ** 2 - log_var_r.exp(), dim=1), dim=0))
+            L_E_term_4 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
+            L_E = L_E_term_1 + self.params["lambda"] * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
+
+            loss = L_E
+
+            return {"loss": loss}
 
 
+        # recons_loss = F.mse_loss(recons, input)
+        #
+        # kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
+        #
+        # loss = recons_loss + kld_weight * kld_loss
+        # return {'loss': loss, 'Reconstruction_Loss': recons_loss, 'KLD': -kld_loss, 'mu': torch.mean(mu),
+        #         'log_var': torch.mean(log_var), 'var': torch.mean(log_var.exp())}
 
