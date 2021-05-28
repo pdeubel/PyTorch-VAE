@@ -266,7 +266,7 @@ class adVAE(BaseVAE):
 
             L_T = torch.mean(torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1), dim=0)
 
-            loss = L_T + self.params["gamma"] * L_G
+            loss = L_T + kld_weight * L_G
 
             return {"loss": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T, "loss_T": L_T,
                     "l_G_z_term_1": L_G_z_term_1, "l_G_z_term_2": L_G_z_term_2,
@@ -290,7 +290,7 @@ class adVAE(BaseVAE):
             L_E_term_2 = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
             L_E_term_3 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_r - mu_r ** 2 - log_var_r.exp(), dim=1), dim=0))
             L_E_term_4 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
-            L_E = L_E_term_1 + self.params["lambda"] * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
+            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
 
             loss = L_E
 
