@@ -2,11 +2,11 @@ from typing import List, Any
 
 import pytorch_lightning as pl
 import torch
+from torch import optim
 from torch import nn
 from torch.nn import functional as F
 
 from models import BaseVAE
-from models.types_ import Tensor
 
 
 class Encoder(pl.LightningModule):
@@ -156,68 +156,72 @@ class adVAE(BaseVAE):
         Reparameterization trick to sample from N(mu, var) from
         N(0,1).
         :param mu: (Tensor) Mean of the latent Gaussian [B x D]
-        :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
+        :param log_var: (Tensor) Standard deviation of the latent Gaussian [B x D]
         :return: (Tensor) [B x D]
         """
         std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
         return eps * std + mu
 
+    def encode(self, x: torch.Tensor) -> List[torch.Tensor]:
+        mu, log_var = self.encoder(x)
+        z = self.reparameterize(mu, log_var)
+
+        return [mu, log_var, z]
+
     def forward(self, x: torch.Tensor, optimizer_idx=0) -> dict:
-        if optimizer_idx == 0:
-            # self.encoder.freeze()
-            # Training Step 1
-            self.mu, self.log_var = self.encoder(x)
-            self.z = self.reparameterize(self.mu, self.log_var)
+        # TODO maybe refine this so some computations don't have to be executed twice per batch
+        #
+        # equal = torch.equal(self.encoder.state_dict()["encoder.0.0.weight"], self.last_x)
+        # self.last_x = self.encoder.state_dict()["encoder.0.0.weight"].clone()
 
-            mu_T, log_var_T = self.transformer(self.z)
-            self.z_T = self.reparameterize(mu_T, log_var_T)
+        # Training Step 1
+        mu, log_var, z = self.encode(x)
 
-            x_r = self.decoder(self.z)
-            x_T_r = self.decoder(self.z_T)
+        mu_T, log_var_T = self.transformer(z)
+        z_T = self.reparameterize(mu_T, log_var_T)
 
-            mu_r, log_var_r = self.encoder(x_r)
-            mu_T_r, log_var_T_r = self.encoder(x_T_r)
+        x_r = self.decoder(z)
+        x_T_r = self.decoder(z_T)
 
-            # self.encoder.unfreeze()
+        mu_r, log_var_r, _ = self.encode(x_r)
+        mu_T_r, log_var_T_r, _ = self.encode(x_T_r)
 
-            return {"x": x,
-                    "x_r": x_r,
-                    "x_T_r": x_T_r,
-                    "mu": self.mu,
-                    "log_var": self.log_var,
-                    "mu_T": mu_T,
-                    "log_var_T": log_var_T,
-                    "mu_r": mu_r,
-                    "log_var_r": log_var_r,
-                    "mu_T_r": mu_T_r,
-                    "log_var_T_r": log_var_T_r}
+        return {"x": x,
+                "x_r": x_r,
+                "x_T_r": x_T_r,
+                "mu": mu,
+                "log_var": log_var,
+                "mu_T": mu_T,
+                "log_var_T": log_var_T,
+                "mu_r": mu_r,
+                "log_var_r": log_var_r,
+                "mu_T_r": mu_T_r,
+                "log_var_T_r": log_var_T_r}
 
-        elif optimizer_idx == 1:
-
-            # Training Step 2
-            # self.decoder.freeze()
-            # self.transformer.freeze()
-
-            # TODO Could be that x_r and x_T_r need to be detached
-            x_r = self.decoder(self.z)
-            x_T_r = self.decoder(self.z_T)
-
-            mu_r, log_var_r = self.encoder(x_r)
-            mu_T_r, log_var_T_r = self.encoder(x_T_r)
-
-            # self.decoder.unfreeze()
-            # self.transformer.unfreeze()
-
-            # Loss Step 2
-            return {"x": x,
-                    "x_r": x_r,
-                    "mu": self.mu,
-                    "log_var": self.log_var,
-                    "mu_r": mu_r,
-                    "log_var_r": log_var_r,
-                    "mu_T_r": mu_T_r,
-                    "log_var_T_r": log_var_T_r}
+        # # Training Step 2
+        # # self.decoder.freeze()
+        # # self.transformer.freeze()
+        #
+        # # TODO Could be that x_r and x_T_r need to be detached
+        # x_r = self.decoder(self.z)
+        # x_T_r = self.decoder(self.z_T)
+        #
+        # mu_r, log_var_r = self.encoder(x_r)
+        # mu_T_r, log_var_T_r = self.encoder(x_T_r)
+        #
+        # # self.decoder.unfreeze()
+        # # self.transformer.unfreeze()
+        #
+        # # Loss Step 2
+        # return {"x": x,
+        #         "x_r": x_r,
+        #         "mu": self.mu,
+        #         "log_var": self.log_var,
+        #         "mu_r": mu_r,
+        #         "log_var_r": log_var_r,
+        #         "mu_T_r": mu_T_r,
+        #         "log_var_T_r": log_var_T_r}
 
     def loss_function(self,
                       results,
@@ -257,8 +261,9 @@ class adVAE(BaseVAE):
             L_G = L_G_z + L_G_z_T
 
             L_T_term_1 = 0.5 * log_var_T - 0.5 * log_var
-            L_T_term_2 = (log_var + torch.square((0.5 * mu).exp() - (0.5 * mu_T).exp())) / (2 * log_var_T)
+            L_T_term_2 =(log_var.exp() + torch.square(mu - mu_T)) / (2 * log_var_T.exp())
             L_T_term_3 = -0.5
+
             L_T = torch.mean(torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1), dim=0)
 
             loss = L_T + self.params["gamma"] * L_G
@@ -285,12 +290,65 @@ class adVAE(BaseVAE):
 
             return {"loss": loss}
 
+    def training_step(self, batch, batch_idx, optimizer_idx=0):
+        real_img, labels = batch
+        self.curr_device = real_img.device
 
-        # recons_loss = F.mse_loss(recons, input)
+        results = self.forward(real_img, optimizer_idx=optimizer_idx)
+        train_loss = self.loss_function(results,
+                                        M_N=self.params['batch_size'] / self.num_train_imgs,
+                                        optimizer_idx=optimizer_idx,
+                                        batch_idx=batch_idx)
+
+        self.logger.experiment.log({key: val.item() for key, val in train_loss.items()})
+
+        return train_loss
+
+    def validation_step(self, batch, batch_idx, optimizer_idx=0):
+        real_img, labels = batch
+        self.curr_device = real_img.device
+
+        results = self.forward(real_img, optimizer_idx=optimizer_idx)
+        val_loss = self.loss_function(results,
+                                      M_N=self.params['batch_size'] / self.num_val_imgs,
+                                      optimizer_idx=optimizer_idx,
+                                      batch_idx=batch_idx)
+
+        return val_loss
+
+    def configure_optimizers(self):
+        """
+        Configures two optimizers, the first for the decoder and transformer and the second for the encoder.
+        This means that training_step and validation_step are called twice for each mini-batch, once per optimizer.
+
+        Each optimizer only changes the weights which it received in the constructor below.
+        """
+        decoder_transformer_optimizer = optim.Adam(
+            [{"params": self.decoder.parameters()}, {"params": self.transformer.parameters()}],
+            lr=self.params['LR'],
+            weight_decay=self.params['weight_decay']
+        )
+
+        encoder_optimizer = optim.Adam(
+            self.encoder.parameters(),
+            lr=self.params['LR'],
+            weight_decay=self.params['weight_decay']
+        )
+
+        return [decoder_transformer_optimizer, encoder_optimizer]
+
+    def sample(self, batch_size: int, current_device: int, **kwargs) -> torch.Tensor:
+        z = torch.randn(batch_size, self.latent_dim).to(current_device)
+
+        return self.decoder(z)
+
+    def generate(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        mu, log_var, z = self.encode(x)
+        # reconstructions = []
+        # for i in range(10):
+        #     current_z = self.reparameterize(mu, log_var)
         #
-        # kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
-        #
-        # loss = recons_loss + kld_weight * kld_loss
-        # return {'loss': loss, 'Reconstruction_Loss': recons_loss, 'KLD': -kld_loss, 'mu': torch.mean(mu),
-        #         'log_var': torch.mean(log_var), 'var': torch.mean(log_var.exp())}
+        #     reconstructions.append(self.decoder(current_z))
+
+        return self.decoder(z)
 

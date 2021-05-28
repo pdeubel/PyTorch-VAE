@@ -143,7 +143,7 @@ class BaseVAE(pl.LightningModule):
         recons = self.generate(test_input, labels=test_label)
 
         self.logger.experiment.add_images("reconstructions",
-                                          make_grid(recons, normalize=True, nrow=1),  # Use make_grid to normalize
+                                          make_grid(recons, normalize=True, nrow=12),  # Use make_grid to normalize
                                           global_step=self.current_epoch,
                                           dataformats='CWH')  # make_grid seems to return channel x width x height
 

@@ -24,6 +24,7 @@ from .vq_vae import VQVAE
 from .betatc_vae import BetaTCVAE
 from .dip_vae import DIPVAE
 from .vanilla_vae_unet import VanillaVAEUNet
+from .adVAE import adVAE
 
 # Aliases
 VAE = VanillaVAE
@@ -54,4 +55,5 @@ vae_models = {'HVAE': HVAE,
               'VanillaVAE_third': VanillaVAE_third,
               'ConditionalVAE': ConditionalVAE,
               'CategoricalVAE': CategoricalVAE,
-              'VanillaVAEUNet': VanillaVAEUNet}
+              'VanillaVAEUNet': VanillaVAEUNet,
+              'adVAE': adVAE}
