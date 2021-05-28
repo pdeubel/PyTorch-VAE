@@ -268,7 +268,9 @@ class adVAE(BaseVAE):
 
             loss = L_T + self.params["gamma"] * L_G
 
-            return {"loss": loss}
+            return {"loss": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T, "loss_T": L_T,
+                    "mu": torch.mean(mu), "var": torch.mean(log_var.exp()),
+                    "mu_T": torch.mean(mu_T), "var_T": torch.mean(log_var_T.exp())}
         elif optimizer_idx == 1:
             # Update Encoder
             x = results["x"]
@@ -288,7 +290,7 @@ class adVAE(BaseVAE):
 
             loss = L_E
 
-            return {"loss": loss}
+            return {"loss": loss, "loss_E": L_E}
 
     def training_step(self, batch, batch_idx, optimizer_idx=0):
         real_img, labels = batch
