@@ -79,9 +79,8 @@ class BaseVAE(pl.LightningModule):
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
-        tensorboard_logs = {'avg_val_loss': avg_loss}
 
-        if self.current_epoch % 5 == 0:
+        if self.current_epoch % 1 == 0:
             self.sample_images()
 
         if self.current_epoch == (self.trainer.max_epochs - 1):
@@ -89,7 +88,9 @@ class BaseVAE(pl.LightningModule):
             self.sample_images()
             self.calculate_roc_auc()
 
-        return {'val_loss': avg_loss, 'log': tensorboard_logs}
+        self.logger.experiment.log({'avg_val_loss': avg_loss})
+
+        return {'val_loss': avg_loss}
 
     def calculate_pixelwise_differences(self, dataloader):
         all_labels = []

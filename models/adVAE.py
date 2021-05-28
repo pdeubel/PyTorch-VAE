@@ -261,7 +261,7 @@ class adVAE(BaseVAE):
             L_G = L_G_z + L_G_z_T
 
             L_T_term_1 = 0.5 * log_var_T - 0.5 * log_var
-            L_T_term_2 =(log_var.exp() + torch.square(mu - mu_T)) / (2 * log_var_T.exp())
+            L_T_term_2 = (log_var.exp() + torch.square(mu - mu_T)) / (2 * log_var_T.exp())
             L_T_term_3 = -0.5
 
             L_T = torch.mean(torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1), dim=0)
@@ -269,6 +269,10 @@ class adVAE(BaseVAE):
             loss = L_T + self.params["gamma"] * L_G
 
             return {"loss": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T, "loss_T": L_T,
+                    "l_G_z_term_1": L_G_z_term_1, "l_G_z_term_2": L_G_z_term_2,
+                    "l_G_z_T_term_1": L_G_z_T_term_1, "l_G_z_T_term_2": L_G_z_T_term_2,
+                    "l_T_term_1": torch.mean(torch.sum(L_T_term_1, dim=1), dim=0),
+                    "l_T_term_2": torch.mean(torch.sum(L_T_term_2, dim=1), dim=0),
                     "mu": torch.mean(mu), "var": torch.mean(log_var.exp()),
                     "mu_T": torch.mean(mu_T), "var_T": torch.mean(log_var_T.exp())}
         elif optimizer_idx == 1:
@@ -290,7 +294,9 @@ class adVAE(BaseVAE):
 
             loss = L_E
 
-            return {"loss": loss, "loss_E": L_E}
+            return {"loss": loss, "loss_E": L_E,
+                    "l_E_term_1": L_E_term_1, "l_E_term_2": L_E_term_2, "l_E_term_3": L_E_term_3,
+                    "l_E_term_4": L_E_term_4}
 
     def training_step(self, batch, batch_idx, optimizer_idx=0):
         real_img, labels = batch
