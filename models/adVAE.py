@@ -153,6 +153,8 @@ class adVAE(BaseVAE):
         self.decoder = Decoder(latent_dim=latent_dim, hidden_dims=hidden_dims)
         self.transformer = Transformer(latent_dim=latent_dim)
 
+        self.lambda_T, self.lambda_G = 1e-22, 1e+1
+
         self.save_hyperparameters()
 
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
@@ -271,7 +273,8 @@ class adVAE(BaseVAE):
 
             L_T = torch.mean(torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1), dim=0)
 
-            loss = L_T + kld_weight * L_G
+            # loss = L_T + kld_weight * L_G
+            loss = self.lambda_T * L_T + self.lambda_G * L_G
 
             return {"loss": loss, "loss_G_and_T": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T,
                     "loss_T": L_T,
