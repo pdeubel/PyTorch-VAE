@@ -268,7 +268,8 @@ class adVAE(BaseVAE):
 
             loss = L_T + kld_weight * L_G
 
-            return {"loss": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T, "loss_T": L_T,
+            return {"loss": loss, "loss_G_and_T": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T,
+                    "loss_T": L_T,
                     "l_G_z_term_1": L_G_z_term_1, "l_G_z_term_2": L_G_z_term_2,
                     "l_G_z_T_term_1": L_G_z_T_term_1, "l_G_z_T_term_2": L_G_z_T_term_2,
                     "l_T_term_1": torch.mean(torch.sum(L_T_term_1, dim=1), dim=0),
