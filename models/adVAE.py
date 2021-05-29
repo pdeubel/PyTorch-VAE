@@ -121,15 +121,19 @@ class Transformer(pl.LightningModule):
         self.latent_dim = latent_dim
 
         self.transformer = nn.Sequential(
-            nn.Linear(in_features=self.latent_dim, out_features=2*self.latent_dim),
-            nn.ELU())
+            nn.Linear(in_features=self.latent_dim, out_features=4 * self.latent_dim),
+            nn.LeakyReLU()
+        )
+
+        self.mu_T = nn.Linear(in_features=4 * self.latent_dim, out_features=self.latent_dim)
+        self.log_var_T = nn.Linear(in_features=4 * self.latent_dim, out_features=self.latent_dim)
 
     def forward(self, z: torch.Tensor) -> Any:
         z_T = self.transformer(z)
-        z_T_mu = z_T[:, :self.latent_dim]
-        z_T_sigma = torch.clip(z_T[:, self.latent_dim:], 1e-12, 1 - 1e-12)
+        z_T_mu = self.mu_T(z_T)
+        z_T_log_var = self.log_var_T(z_T)
 
-        return z_T_mu, z_T_sigma
+        return z_T_mu, z_T_log_var
 
 
 # noinspection PyPep8Naming
@@ -255,7 +259,8 @@ class adVAE(BaseVAE):
             L_G_z = L_G_z_term_1 + self.params["gamma"] * L_G_z_term_2
 
             L_G_z_T_term_1 = F.relu(self.params["m_x"] - F.mse_loss(x_r, x_T_r))
-            L_G_z_T_term_2 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
+            L_G_z_T_term_2 = F.relu(self.params["m_z"] - torch.mean(
+                -0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
             L_G_z_T = L_G_z_T_term_1 + self.params["gamma"] * L_G_z_T_term_2
 
             L_G = L_G_z + L_G_z_T
@@ -289,9 +294,13 @@ class adVAE(BaseVAE):
 
             L_E_term_1 = F.mse_loss(x, x_r)
             L_E_term_2 = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
-            L_E_term_3 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_r - mu_r ** 2 - log_var_r.exp(), dim=1), dim=0))
-            L_E_term_4 = F.relu(self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
-            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
+            L_E_term_3 = F.relu(
+                self.params["m_z"] - torch.mean(-0.5 * torch.sum(1 + log_var_r - mu_r ** 2 - log_var_r.exp(), dim=1),
+                                                dim=0))
+            L_E_term_4 = F.relu(self.params["m_z"] - torch.mean(
+                -0.5 * torch.sum(1 + log_var_T_r - mu_T_r ** 2 - log_var_T_r.exp(), dim=1), dim=0))
+            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params[
+                "gamma"] * L_E_term_4
 
             loss = L_E
 
@@ -360,4 +369,3 @@ class adVAE(BaseVAE):
         #     reconstructions.append(self.decoder(current_z))
 
         return self.decoder(z)
-
