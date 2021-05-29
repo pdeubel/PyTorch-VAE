@@ -153,7 +153,8 @@ class adVAE(BaseVAE):
         self.decoder = Decoder(latent_dim=latent_dim, hidden_dims=hidden_dims)
         self.transformer = Transformer(latent_dim=latent_dim)
 
-        self.lambda_T, self.lambda_G = 1e-22, 1e+1
+        # Only used for logging to see if training converges
+        self.summary_loss = 0
 
         self.save_hyperparameters()
 
@@ -273,8 +274,11 @@ class adVAE(BaseVAE):
 
             L_T = torch.mean(torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1), dim=0)
 
-            # loss = L_T + kld_weight * L_G
-            loss = self.lambda_T * L_T + self.lambda_G * L_G
+            loss = L_T + kld_weight * L_G
+
+            # This is used when loss_function is called with optimizer_idx=1, then the encoder loss is added and
+            # the summed loss of generator+transformer and encoder is logged
+            self.summary_loss = loss
 
             return {"loss": loss, "loss_G_and_T": loss, "loss_G": L_G, "loss_G_z": L_G_z, "loss_G_z_T": L_G_z_T,
                     "loss_T": L_T,
@@ -307,7 +311,7 @@ class adVAE(BaseVAE):
 
             loss = L_E
 
-            return {"loss": loss, "loss_E": L_E,
+            return {"loss": loss, "loss_summary": self.summary_loss + loss, "loss_E": L_E,
                     "l_E_term_1": L_E_term_1, "l_E_term_2": L_E_term_2, "l_E_term_3": L_E_term_3,
                     "l_E_term_4": L_E_term_4}
 
