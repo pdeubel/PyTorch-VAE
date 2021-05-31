@@ -8,7 +8,7 @@ from sklearn.metrics import roc_curve, auc
 from torch import optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.datasets import CelebA
+from torchvision.datasets import CelebA, MNIST
 from torchvision.utils import make_grid
 
 from datasets.concrete_cracks import ConcreteCracksDataset
@@ -230,6 +230,11 @@ class BaseVAE(pl.LightningModule):
                                 split=split,
                                 abnormal_data=abnormal_data,
                                 transform=transform)
+        elif self.params['dataset'] == 'MNIST':
+            dataset = MNIST(root=self.params['data_path'],
+                            train=train_split,
+                            download=False,
+                            transform=transform)
         else:
             raise ValueError('Undefined dataset type')
 
@@ -257,6 +262,10 @@ class BaseVAE(pl.LightningModule):
                                             transforms.ToTensor(),
                                             SetRange])
         elif self.params['dataset'] == 'SDNET2018':
+            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
+                                            transforms.ToTensor(),
+                                            SetRange])
+        elif self.params['dataset'] == 'MNIST':
             transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])

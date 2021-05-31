@@ -25,6 +25,7 @@ from .betatc_vae import BetaTCVAE
 from .dip_vae import DIPVAE
 from .vanilla_vae_unet import VanillaVAEUNet
 from .adVAE import adVAE
+from .adVAE_MNIST import adVAEMNIST
 
 # Aliases
 VAE = VanillaVAE
@@ -56,4 +57,5 @@ vae_models = {'HVAE': HVAE,
               'ConditionalVAE': ConditionalVAE,
               'CategoricalVAE': CategoricalVAE,
               'VanillaVAEUNet': VanillaVAEUNet,
-              'adVAE': adVAE}
+              'adVAE': adVAE,
+              'adVAEMNIST': adVAEMNIST}
