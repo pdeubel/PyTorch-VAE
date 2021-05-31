@@ -267,8 +267,7 @@ class BaseVAE(pl.LightningModule):
                                             SetRange])
         elif self.params['dataset'] == 'MNIST':
             transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
-                                            transforms.ToTensor(),
-                                            SetRange])
+                                            transforms.ToTensor()])
         else:
             raise ValueError('Undefined dataset type')
         return transform

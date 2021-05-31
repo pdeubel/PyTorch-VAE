@@ -1,0 +1,23 @@
+model_params:
+  name: 'adVAEMNIST'
+  in_channels: 1
+  latent_dim: 128
+
+exp_params:
+  dataset: MNIST
+  data_path: "/cvhci/temp/p21g3/data/"
+  img_size: 28
+  batch_size: 32 # Better to have a square number
+  LR: 0.0001
+  weight_decay: 0.0
+  m_x: 1
+  m_z: 1
+
+trainer_params:
+  gpus: [3]
+  max_epochs: 100
+
+logging_params:
+  save_dir: "/cvhci/temp/p21g3/PyTorch-VAE/logs/"
+  name: "adVAE-MNIST"
+  manual_seed: 100
