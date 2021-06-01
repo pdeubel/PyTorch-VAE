@@ -34,6 +34,7 @@ import torch
 from torch import optim
 from torch import nn
 from torch.nn import functional as F
+from torch.distributions import Normal
 
 from models import BaseVAE
 
@@ -257,7 +258,8 @@ class adVAEMNIST(BaseVAE):
 
         torch.autograd.set_detect_anomaly(True)
 
-        self.synthesized_anomalies = None
+        self.mu = None
+        self.sigma = None
 
     def reparameterize(self, mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """
@@ -284,87 +286,33 @@ class adVAEMNIST(BaseVAE):
         # self.last_x = self.encoder.state_dict()["encoder.0.0.weight"].clone()
 
         # Training Step 1
-        if optimizer_idx == 0:
-            with torch.no_grad():
-                z_mu, z_sigma, z = self.encode(x)
+        self.mu, self.sigma, z = self.encode(x)
 
-            z_mu_T, z_sigma_T = self.transformer(z)
-            z_T = self.reparameterize(z_mu_T, z_sigma_T)
+        z_mu_T, z_sigma_T = self.transformer(z)
+        z_T = self.reparameterize(z_mu_T, z_sigma_T)
 
-            x_r = self.decoder(z)
-            x_T_r = self.decoder(z_T)
+        x_r = self.decoder(z)
+        x_T_r = self.decoder(z_T)
 
-            self.synthesized_anomalies = x_T_r
+        self.synthesized_anomalies = x_T_r
 
-            with torch.no_grad():
-                mu_r, sigma_r, _ = self.encode(x_r)
-                mu_T_r, sigma_T_r, _ = self.encode(x_T_r)
+        mu_r, sigma_r, _ = self.encode(x_r)
+        mu_T_r, sigma_T_r, _ = self.encode(x_T_r)
 
-                test_mu_T_r = torch.mean(torch.sum(mu_T_r, dim=1), dim=0)
-                test_sigma_T_r = torch.mean(torch.sum(sigma_T_r, dim=1), dim=0)
-
-            print("hello")
-        elif optimizer_idx == 1:
-
-            z_mu, z_sigma, z = self.encode(x)
-
-            with torch.no_grad():
-                z_mu_T, z_sigma_T = self.transformer(z)
-
-            z_T = self.reparameterize(z_mu_T, z_sigma_T)
-
-            with torch.no_grad():
-                x_r = self.decoder(z)
-                x_T_r = self.decoder(z_T)
-
-                self.synthesized_anomalies = x_T_r
-
-            mu_r, sigma_r, _ = self.encode(x_r)
-            mu_T_r, sigma_T_r, _ = self.encode(x_T_r)
-
-            test_mu_T_r = torch.mean(torch.sum(mu_T_r, dim=1), dim=0)
-            test_sigma_T_r = torch.mean(torch.sum(sigma_T_r, dim=1), dim=0)
-
-            print("Hello")
-
-        else:
-            raise RuntimeError("adVAE only supports exactly two optimizers")
+        test_mu_T_r = torch.mean(torch.sum(mu_T_r, dim=1), dim=0)
+        test_sigma_T_r = torch.mean(torch.sum(sigma_T_r, dim=1), dim=0)
 
         return {"x": x,
                 "x_r": x_r,
                 "x_T_r": x_T_r,
-                "z_mu": z_mu,
-                "z_sigma": z_sigma,
+                "z_mu": self.mu,
+                "z_sigma": self.sigma,
                 "z_mu_T": z_mu_T,
                 "z_sigma_T": z_sigma_T,
                 "mu_r": mu_r,
                 "sigma_r": sigma_r,
                 "mu_T_r": mu_T_r,
                 "sigma_T_r": sigma_T_r}
-
-        # # Training Step 2
-        # # self.decoder.freeze()
-        # # self.transformer.freeze()
-        #
-        # # TODO Could be that x_r and x_T_r need to be detached
-        # x_r = self.decoder(self.z)
-        # x_T_r = self.decoder(self.z_T)
-        #
-        # mu_r, log_var_r = self.encoder(x_r)
-        # mu_T_r, log_var_T_r = self.encoder(x_T_r)
-        #
-        # # self.decoder.unfreeze()
-        # # self.transformer.unfreeze()
-        #
-        # # Loss Step 2
-        # return {"x": x,
-        #         "x_r": x_r,
-        #         "mu": self.mu,
-        #         "log_var": self.log_var,
-        #         "mu_r": mu_r,
-        #         "log_var_r": log_var_r,
-        #         "mu_T_r": mu_T_r,
-        #         "log_var_T_r": log_var_T_r}
 
     def loss_function(self,
                       results,
@@ -377,6 +325,7 @@ class adVAEMNIST(BaseVAE):
         :return:
         """
         optimizer_idx = kwargs['optimizer_idx']
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
 
         x = results["x"]
         x_r = results["x_r"]
@@ -401,22 +350,29 @@ class adVAEMNIST(BaseVAE):
 
             L_G_z_term_1 = F.mse_loss(x, x_r)
             L_G_z_term_2 = kl_divergence(mu_r, sigma_r)
-            L_G_z = L_G_z_term_1 + L_G_z_term_2
+            L_G_z = L_G_z_term_1 + kld_weight * L_G_z_term_2
 
-            L_G_z_T_term_1 = self.params["m_x"] - F.mse_loss(x_r, x_T_r)
-            L_G_z_T_term_1 = torch.maximum(torch.zeros_like(L_G_z_T_term_1), L_G_z_T_term_1)
+            # L_G_z_T_term_1 = self.params["m_x"] - F.mse_loss(x_r, x_T_r)
+            # L_G_z_T_term_1 = torch.maximum(torch.zeros_like(L_G_z_T_term_1), L_G_z_T_term_1)
 
-            L_G_z_T_term_2 = self.params["m_z"] - kl_divergence(mu_T_r, sigma_T_r)
-            L_G_z_T_term_2 = torch.maximum(torch.zeros_like(L_G_z_T_term_2), L_G_z_T_term_2)
+            L_G_z_T_term_1 = F.relu(self.params["m_x"] - F.mse_loss(x_r, x_T_r))
+
+            # L_G_z_T_term_2 = self.params["m_z"] - kl_divergence(mu_T_r, sigma_T_r)
+            # L_G_z_T_term_2 = torch.maximum(torch.zeros_like(L_G_z_T_term_2), L_G_z_T_term_2)
+
+            L_G_z_T_term_2 = F.relu(self.params["m_z"] - kl_divergence(mu_T_r, sigma_T_r))
 
             L_G_z_T = L_G_z_T_term_1 + L_G_z_T_term_2
 
-            L_G = L_G_z + L_G_z_T
+            L_G = L_G_z + self.params["gamma"] * L_G_z_T
 
-            loss = torch.mean((self.lambda_T * L_T) + (self.lambda_G * L_G), dim=0)
+            loss = torch.mean((self.params["gamma"] * L_T) + (self.lambda_G * L_G), dim=0)
 
-            loss_T = torch.mean(self.lambda_T * L_T, dim=0)
-            loss_G = torch.mean(self.lambda_G * L_G, dim=0)
+            # loss_T = torch.mean(self.lambda_T * L_T, dim=0)
+            # loss_G = torch.mean(self.lambda_G * L_G, dim=0)
+
+            loss_T = torch.mean(L_T, dim=0)
+            loss_G = torch.mean(L_G, dim=0)
 
             # This is used when loss_function is called with optimizer_idx=1, then the encoder loss is added and
             # the summed loss of generator+transformer and encoder is logged
@@ -443,7 +399,7 @@ class adVAEMNIST(BaseVAE):
             L_E_term_4 = self.params["m_z"] - kl_divergence(mu_T_r, sigma_T_r)
             L_E_term_4 = torch.maximum(torch.zeros_like(L_E_term_4), L_E_term_4)
 
-            L_E = L_E_term_1 + L_E_term_2 + L_E_term_3 + L_E_term_4
+            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
 
             loss = torch.mean(L_E, dim=0)
 
@@ -491,6 +447,36 @@ class adVAEMNIST(BaseVAE):
 
         return {'val_loss': avg_loss}
 
+    def sample_images(self):
+        # Get sample reconstruction image
+        test_input, test_label = next(iter(self.sample_dataloader))
+        test_input = test_input.to(self.curr_device)
+        test_label = test_label.to(self.curr_device)
+
+        recons, synthesized_anomalies = self.generate(test_input, labels=test_label)
+        samples_normal, samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
+
+        self.logger.experiment.add_images("originals",
+                                          test_input,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("reconstructions",
+                                          recons,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("synthesized anomalies",
+                                          synthesized_anomalies,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples_normal",
+                                          samples_normal,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples",
+                                          samples,
+                                          global_step=self.current_epoch)
+
+
     def configure_optimizers(self):
         """
         Configures two optimizers, the first for the decoder and transformer and the second for the encoder.
@@ -512,17 +498,26 @@ class adVAEMNIST(BaseVAE):
 
         return [decoder_transformer_optimizer, encoder_optimizer]
 
-    def sample(self, batch_size: int, current_device: int, **kwargs) -> torch.Tensor:
-        z = torch.randn(batch_size, self.latent_dim).to(current_device)
+    def sample(self, batch_size: int, current_device: int, **kwargs):
+        z_normal = torch.randn(batch_size, self.latent_dim).to(current_device)
 
-        return self.decoder(z)
+        distribution = Normal(loc=torch.mean(torch.sum(self.mu, dim=1), dim=0), scale=torch.mean(torch.sum(self.sigma.exp(), dim=1), dim=0))
+
+        z = distribution.sample((batch_size, self.latent_dim))
+
+        return self.decoder(z_normal), self.decoder(z)
 
     def generate(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        mu, log_var, z = self.encode(x)
-        # reconstructions = []
-        # for i in range(10):
-        #     current_z = self.reparameterize(mu, log_var)
-        #
-        #     reconstructions.append(self.decoder(current_z))
+        results = self.forward(x)
 
-        return self.decoder(z)
+        return results["x_r"], results["x_T_r"]
+
+    def synthesize_anomalies(self, x: torch.Tensor):
+        z_mu, z_sigma, z = self.encode(x)
+
+        z_mu_T, z_sigma_T = self.transformer(z)
+        z_T = self.reparameterize(z_mu_T, z_sigma_T)
+
+        x_T_r = self.decoder(z_T)
+
+        return x_T_r
