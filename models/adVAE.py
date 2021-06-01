@@ -163,7 +163,7 @@ class adVAE(BaseVAE):
 
         self.save_hyperparameters()
 
-        self.mu, self.log_var = None
+        self.mu, self.log_var = None, None
 
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         """
@@ -375,7 +375,7 @@ class adVAE(BaseVAE):
         z_normal = torch.randn(batch_size, self.latent_dim).to(current_device)
 
         distribution = Normal(loc=torch.mean(torch.sum(self.mu, dim=1), dim=0),
-                              scale=torch.mean(torch.sum(self.sigma.exp(), dim=1), dim=0))
+                              scale=torch.mean(torch.sum(self.log_var.exp(), dim=1), dim=0))
 
         z = distribution.sample((batch_size, self.latent_dim)).to(current_device)
 
