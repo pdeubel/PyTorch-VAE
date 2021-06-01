@@ -163,6 +163,8 @@ class adVAE(BaseVAE):
 
         self.save_hyperparameters()
 
+        self.mu, self.log_var = None
+
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         """
         Reparameterization trick to sample from N(mu, var) from
@@ -188,7 +190,7 @@ class adVAE(BaseVAE):
         # self.last_x = self.encoder.state_dict()["encoder.0.0.weight"].clone()
 
         # Training Step 1
-        mu, log_var, z = self.encode(x)
+        self.mu, self.log_var, z = self.encode(x)
 
         mu_T, log_var_T = self.transformer(z)
         z_T = self.reparameterize(mu_T, log_var_T)
@@ -202,8 +204,8 @@ class adVAE(BaseVAE):
         return {"x": x,
                 "x_r": x_r,
                 "x_T_r": x_T_r,
-                "mu": mu,
-                "log_var": log_var,
+                "mu": self.mu,
+                "log_var": self.log_var,
                 "mu_T": mu_T,
                 "log_var_T": log_var_T,
                 "mu_r": mu_r,
