@@ -2,8 +2,9 @@ from typing import List, Any
 
 import pytorch_lightning as pl
 import torch
-from torch import optim
 from torch import nn
+from torch import optim
+from torch.distributions import Normal
 from torch.nn import functional as F
 
 from models import BaseVAE
@@ -210,7 +211,6 @@ class adVAE(BaseVAE):
                 "mu_T_r": mu_T_r,
                 "log_var_T_r": log_var_T_r}
 
-
     def loss_function(self,
                       results,
                       **kwargs) -> dict:
@@ -238,7 +238,6 @@ class adVAE(BaseVAE):
         log_var_T_r = results["log_var_T_r"]
 
         if optimizer_idx == 0:
-
             L_T_term_1 = 0.5 * log_var_T - 0.5 * log_var
             L_T_term_2 = (log_var.exp() + torch.square(mu - mu_T)) / (2 * log_var_T.exp())
             L_T_term_3 = -0.5
@@ -276,7 +275,8 @@ class adVAE(BaseVAE):
             L_E_term_3 = F.relu(self.params["m_z"] - kl_divergence(mu_r, log_var_r))
             L_E_term_4 = F.relu(self.params["m_z"] - kl_divergence(mu_T_r, log_var_T_r))
 
-            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
+            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params[
+                "gamma"] * L_E_term_4
 
             loss = torch.mean(L_E, dim=0)
 
@@ -309,6 +309,45 @@ class adVAE(BaseVAE):
 
         return val_loss
 
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+
+        if self.current_epoch % 1 == 0 or self.current_epoch == (self.trainer.max_epochs - 1):
+            self.sample_images()
+
+        self.logger.experiment.log({'avg_val_loss': avg_loss})
+
+        return {'val_loss': avg_loss}
+
+    def sample_images(self):
+        # Get sample reconstruction image
+        test_input, test_label = next(iter(self.sample_dataloader))
+        test_input = test_input.to(self.curr_device)
+        test_label = test_label.to(self.curr_device)
+
+        recons, synthesized_anomalies = self.generate(test_input, labels=test_label)
+        samples_normal, samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
+
+        self.logger.experiment.add_images("originals",
+                                          test_input,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("reconstructions",
+                                          recons,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("synthesized anomalies",
+                                          synthesized_anomalies,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples_normal",
+                                          samples_normal,
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples",
+                                          samples,
+                                          global_step=self.current_epoch)
+
     def configure_optimizers(self):
         """
         Configures two optimizers, the first for the decoder and transformer and the second for the encoder.
@@ -330,17 +369,17 @@ class adVAE(BaseVAE):
 
         return [decoder_transformer_optimizer, encoder_optimizer]
 
-    def sample(self, batch_size: int, current_device: int, **kwargs) -> torch.Tensor:
-        z = torch.randn(batch_size, self.latent_dim).to(current_device)
+    def sample(self, batch_size: int, current_device: int, **kwargs):
+        z_normal = torch.randn(batch_size, self.latent_dim).to(current_device)
 
-        return self.decoder(z)
+        distribution = Normal(loc=torch.mean(torch.sum(self.mu, dim=1), dim=0),
+                              scale=torch.mean(torch.sum(self.sigma.exp(), dim=1), dim=0))
 
-    def generate(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        mu, log_var, z = self.encode(x)
-        # reconstructions = []
-        # for i in range(10):
-        #     current_z = self.reparameterize(mu, log_var)
-        #
-        #     reconstructions.append(self.decoder(current_z))
+        z = distribution.sample((batch_size, self.latent_dim)).to(current_device)
 
-        return self.decoder(z)
+        return self.decoder(z_normal), self.decoder(z)
+
+    def generate(self, x: torch.Tensor, **kwargs):
+        results = self.forward(x)
+
+        return results["x_r"], results["x_T_r"]

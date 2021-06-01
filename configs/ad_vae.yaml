@@ -11,11 +11,12 @@ exp_params:
   # data_path: "/cvhci/data/construction/SDNET2018"
   img_size: 128
   batch_size: 144 # Better to have a square number
-  LR: 0.001
+  LR: 0.0001
   weight_decay: 0.0
-  gamma: 0.001
-  m_x: 2
-  m_z: 20
+  gamma: 0.0001
+  m_x: 1
+  m_z: 1
+  lambda_G: 10.0
 
 trainer_params:
   gpus: [3]

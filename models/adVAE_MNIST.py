@@ -27,14 +27,14 @@ PyTorch implementation of adVAE for MNIST. This is adapted from the following Te
 https://github.com/YeongHyeon/adVAE 
 """
 
-from typing import List, Any
+from typing import List
 
 import pytorch_lightning as pl
 import torch
-from torch import optim
 from torch import nn
-from torch.nn import functional as F
+from torch import optim
 from torch.distributions import Normal
+from torch.nn import functional as F
 
 from models import BaseVAE
 
@@ -80,18 +80,15 @@ class Encoder(pl.LightningModule):
         self.conv4 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(3, 3), stride=1,
                                padding=1)
 
-
         nn.init.kaiming_normal_(self.conv4.weight)
 
         self.conv5 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3), stride=1,
                                padding=1)
 
-
         nn.init.kaiming_normal_(self.conv5.weight)
 
         self.conv6 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(3, 3), stride=1,
                                padding=1)
-
 
         nn.init.kaiming_normal_(self.conv6.weight)
 
@@ -244,7 +241,6 @@ class adVAEMNIST(BaseVAE):
 
         self.latent_dim = latent_dim
 
-        self.lambda_T = 1e-22
         self.lambda_G = 10.0
 
         self.encoder = Encoder(in_channels=in_channels, latent_dim=latent_dim)
@@ -293,8 +289,6 @@ class adVAEMNIST(BaseVAE):
 
         x_r = self.decoder(z)
         x_T_r = self.decoder(z_T)
-
-        self.synthesized_anomalies = x_T_r
 
         mu_r, sigma_r, _ = self.encode(x_r)
         mu_T_r, sigma_T_r, _ = self.encode(x_T_r)
@@ -399,7 +393,8 @@ class adVAEMNIST(BaseVAE):
             L_E_term_4 = self.params["m_z"] - kl_divergence(mu_T_r, sigma_T_r)
             L_E_term_4 = torch.maximum(torch.zeros_like(L_E_term_4), L_E_term_4)
 
-            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params["gamma"] * L_E_term_4
+            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params[
+                "gamma"] * L_E_term_4
 
             loss = torch.mean(L_E, dim=0)
 
@@ -439,9 +434,6 @@ class adVAEMNIST(BaseVAE):
 
         if self.current_epoch % 1 == 0 or self.current_epoch == (self.trainer.max_epochs - 1):
             self.sample_images()
-            self.logger.experiment.add_images("Synthesized anomalies",
-                                              self.synthesized_anomalies,  # Use make_grid to normalize
-                                              global_step=self.current_epoch)  #
 
         self.logger.experiment.log({'avg_val_loss': avg_loss})
 
@@ -476,7 +468,6 @@ class adVAEMNIST(BaseVAE):
                                           samples,
                                           global_step=self.current_epoch)
 
-
     def configure_optimizers(self):
         """
         Configures two optimizers, the first for the decoder and transformer and the second for the encoder.
@@ -501,7 +492,8 @@ class adVAEMNIST(BaseVAE):
     def sample(self, batch_size: int, current_device: int, **kwargs):
         z_normal = torch.randn(batch_size, self.latent_dim).to(current_device)
 
-        distribution = Normal(loc=torch.mean(torch.sum(self.mu, dim=1), dim=0), scale=torch.mean(torch.sum(self.sigma.exp(), dim=1), dim=0))
+        distribution = Normal(loc=torch.mean(torch.sum(self.mu, dim=1), dim=0),
+                              scale=torch.mean(torch.sum(self.sigma.exp(), dim=1), dim=0))
 
         z = distribution.sample((batch_size, self.latent_dim))
 
