@@ -27,7 +27,7 @@ class BaseVAE(pl.LightningModule):
         try:
             num_workers = params["dataloader_workers"]
         except KeyError:
-            num_workers = 1
+            num_workers = 0
 
         self.additional_dataloader_args = {'num_workers': num_workers, 'pin_memory': True}
 
@@ -266,8 +266,7 @@ class BaseVAE(pl.LightningModule):
                                             transforms.ToTensor(),
                                             SetRange])
         elif self.params['dataset'] == 'MNIST':
-            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
-                                            transforms.ToTensor()])
+            transform = transforms.Compose([transforms.ToTensor()])
         else:
             raise ValueError('Undefined dataset type')
         return transform
