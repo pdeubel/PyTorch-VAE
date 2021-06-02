@@ -321,6 +321,10 @@ class adVAE(BaseVAE):
 
         return {'val_loss': avg_loss}
 
+    @staticmethod
+    def denormalize(x: torch.Tensor):
+        return (x + 1) / 2.0
+
     def sample_images(self):
         # Get sample reconstruction image
         test_input, test_label = next(iter(self.sample_dataloader))
@@ -330,25 +334,27 @@ class adVAE(BaseVAE):
         recons, synthesized_anomalies = self.generate(test_input, labels=test_label)
         samples_normal, samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
 
+        # Using denormalize() to get images back to [0, 1] range
         self.logger.experiment.add_images("originals",
-                                          test_input,
+                                          self.denormalize(test_input),
                                           global_step=self.current_epoch)
 
         self.logger.experiment.add_images("reconstructions",
-                                          recons,
+                                          self.denormalize(recons),
                                           global_step=self.current_epoch)
 
-        self.logger.experiment.add_images("synthesized anomalies",
-                                          synthesized_anomalies,
-                                          global_step=self.current_epoch)
-
-        self.logger.experiment.add_images("samples_normal",
-                                          samples_normal,
+        self.logger.experiment.add_images("synthesized_anomalies",
+                                          self.denormalize(synthesized_anomalies),
                                           global_step=self.current_epoch)
 
         self.logger.experiment.add_images("samples",
-                                          samples,
+                                          self.denormalize(samples),
                                           global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples_normal",
+                                          self.denormalize(samples_normal),
+                                          global_step=self.current_epoch)
+
 
     def configure_optimizers(self):
         """
