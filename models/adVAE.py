@@ -14,6 +14,17 @@ def kl_divergence(mu, log_var):
     return 0.5 * torch.sum(-log_var - 1 + log_var.exp() + torch.square(mu), dim=1)
 
 
+def initialize_weights(parameters):
+    # This reinitializes the given parameters inplace, so no return value is needed
+    for param in parameters:
+        try:
+            nn.init.kaiming_normal_(param)
+        except ValueError:
+            # Most likely this error is caused because parameter is a bias, where kaiming normal initialization
+            # does not work
+            pass
+
+
 class Encoder(pl.LightningModule):
 
     def __init__(self, in_channels: int, latent_dim: int, hidden_dims: List = None):
@@ -41,6 +52,8 @@ class Encoder(pl.LightningModule):
         # TODO I hacked this hardcoded value into here because original author did the same, should be better done
         self.fc_mu = nn.Linear(hidden_dims[-1] * 4, latent_dim)
         self.fc_var = nn.Linear(hidden_dims[-1] * 4, latent_dim)
+
+        initialize_weights(self.parameters())
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         """
@@ -103,6 +116,8 @@ class Decoder(pl.LightningModule):
 
         hidden_dims.reverse()
 
+        initialize_weights(self.parameters())
+
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """
         Maps the given latent codes
@@ -132,6 +147,8 @@ class Transformer(pl.LightningModule):
 
         self.mu_T = nn.Linear(in_features=4 * self.latent_dim, out_features=self.latent_dim)
         self.log_var_T = nn.Linear(in_features=4 * self.latent_dim, out_features=self.latent_dim)
+
+        initialize_weights(self.parameters())
 
     def forward(self, z: torch.Tensor) -> Any:
         z_T = self.transformer(z)
