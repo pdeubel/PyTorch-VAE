@@ -466,6 +466,7 @@ class adVAEAnomaly(BaseVAE):
 
         # Get an anormal sample
         x_a, _ = next(self.abnormal_train_dataloader)
+        x_a = x_a.to(self.curr_device)
 
         mu_a, log_var_a, z_a = self.encode(x_a)
 
