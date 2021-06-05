@@ -435,7 +435,9 @@ class adVAEAnomaly(BaseVAE):
 
         self.mu, self.log_var = None, None
 
-        self.abnormal_train_dataloader = iter(self.get_dataloader(train_split=True, abnormal_data=True)[0])
+
+        self.abnormal_train_dataloader = self.get_dataloader(train_split=True, abnormal_data=True)[0]
+        self.abnormal_train_iterator = iter(self.abnormal_train_dataloader)
 
     def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         """
@@ -465,7 +467,13 @@ class adVAEAnomaly(BaseVAE):
         self.mu, self.log_var, z = self.encode(x)
 
         # Get an anormal sample
-        x_a, _ = next(self.abnormal_train_dataloader)
+        try:
+            x_a, _ = next(self.abnormal_train_iterator)
+        except StopIteration:
+            # Abnormal dataloader has finished an epoch, reset it
+            self.abnormal_train_iterator = iter(self.abnormal_train_dataloader)
+            x_a, _ = next(self.abnormal_train_iterator)
+
         x_a = x_a.to(self.curr_device)
 
         mu_a, log_var_a, z_a = self.encode(x_a)
