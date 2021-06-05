@@ -410,3 +410,260 @@ class adVAE(BaseVAE):
         results = self.forward(x)
 
         return results["x_r"], results["x_T_r"]
+
+
+# noinspection PyPep8Naming
+class adVAEAnomaly(BaseVAE):
+
+    def __init__(self,
+                 params: dict,
+                 in_channels: int,
+                 latent_dim: int,
+                 hidden_dims: List = None,
+                 **kwargs) -> None:
+        super().__init__(params)
+
+        self.latent_dim = latent_dim
+
+        self.encoder = Encoder(in_channels=in_channels, latent_dim=latent_dim, hidden_dims=hidden_dims)
+        self.decoder = Decoder(latent_dim=latent_dim, hidden_dims=hidden_dims)
+
+        # Only used for logging to see if training converges
+        self.summary_loss = 0
+
+        self.save_hyperparameters()
+
+        self.mu, self.log_var = None, None
+
+        self.abnormal_train_dataloader = iter(self.get_dataloader(train_split=True, abnormal_data=True)[0])
+
+    def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
+        """
+        Reparameterization trick to sample from N(mu, var) from
+        N(0,1).
+        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
+        :param log_var: (Tensor) Standard deviation of the latent Gaussian [B x D]
+        :return: (Tensor) [B x D]
+        """
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return eps * std + mu
+
+    def encode(self, x: torch.Tensor) -> List[torch.Tensor]:
+        mu, log_var = self.encoder(x)
+        z = self.reparameterize(mu, log_var)
+
+        return [mu, log_var, z]
+
+    def forward(self, x: torch.Tensor, optimizer_idx=0) -> dict:
+        # TODO maybe refine this so some computations don't have to be executed twice per batch
+        #
+        # equal = torch.equal(self.encoder.state_dict()["encoder.0.0.weight"], self.last_x)
+        # self.last_x = self.encoder.state_dict()["encoder.0.0.weight"].clone()
+
+        # Training Step 1
+        self.mu, self.log_var, z = self.encode(x)
+
+        # Get an anormal sample
+        x_a, _ = next(self.abnormal_train_dataloader)
+
+        mu_a, log_var_a, z_a = self.encode(x_a)
+
+        x_r = self.decoder(z)
+        x_a_r = self.decoder(z_a)
+
+        mu_r, log_var_r, _ = self.encode(x_r)
+        mu_a_r, log_var_a_r, _ = self.encode(x_a_r)
+
+        return {"x": x,
+                "x_r": x_r,
+                "x_a_r": x_a_r,
+                "mu": self.mu,
+                "log_var": self.log_var,
+                "mu_a": mu_a,
+                "log_var_a": log_var_a,
+                "mu_r": mu_r,
+                "log_var_r": log_var_r,
+                "mu_a_r": mu_a_r,
+                "log_var_a_r": log_var_a_r}
+
+    def loss_function(self,
+                      results,
+                      **kwargs) -> dict:
+        """
+        Computes the VAE loss function.
+        KL(N(\mu, \sigma), N(0, 1)) = \log \frac{1}{\sigma} + \frac{\sigma^2 + \mu^2}{2} - \frac{1}{2}
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
+        optimizer_idx = kwargs['optimizer_idx']
+
+        # Update Generator and Transformer
+        x = results["x"]
+        x_r = results["x_r"]
+        x_a_r = results["x_a_r"]
+        mu = results["mu"]
+        log_var = results["log_var"]
+        mu_a = results["mu_a"]
+        log_var_a = results["log_var_a"]
+        mu_r = results["mu_r"]
+        log_var_r = results["log_var_r"]
+        mu_a_r = results["mu_a_r"]
+        log_var_a_r = results["log_var_a_r"]
+
+        if optimizer_idx == 0:
+            L_T_term_1 = 0.5 * log_var_a - 0.5 * log_var
+            L_T_term_2 = (log_var.exp() + torch.square(mu - mu_a)) / (2 * log_var_a.exp())
+            L_T_term_3 = -0.5
+
+            L_T = torch.sum(L_T_term_1 + L_T_term_2 + L_T_term_3, dim=1)
+
+            L_G_z_term_1 = F.mse_loss(x, x_r)
+            L_G_z_term_2 = kl_divergence(mu_r, log_var_r)
+            L_G_z = L_G_z_term_1 + kld_weight * L_G_z_term_2
+
+            L_G_z_T_term_1 = F.relu(self.params["m_x"] - F.mse_loss(x_r, x_a_r))
+            L_G_z_T_term_2 = F.relu(self.params["m_z"] - kl_divergence(mu_a_r, log_var_a_r))
+
+            L_G_z_T = L_G_z_T_term_1 + L_G_z_T_term_2
+
+            L_G = L_G_z + self.params["gamma"] * L_G_z_T
+
+            loss = torch.mean((self.params["gamma"] * L_T) + (self.params["lambda_G"] * L_G), dim=0)
+
+            # This is used for logging
+            loss_T = torch.mean(self.params["gamma"] * L_T, dim=0)
+            loss_G = torch.mean(self.params["lambda_G"] * L_G, dim=0)
+
+            # This is used when loss_function is called with optimizer_idx=1, then the encoder loss is added and
+            # the summed loss of generator+transformer and encoder is logged
+            self.summary_loss = loss
+
+            return {"loss": loss,
+                    "loss_T": loss_T, "loss_G": loss_G}
+
+        elif optimizer_idx == 1:
+            # Update Encoder
+            L_E_term_1 = F.mse_loss(x, x_r)
+            L_E_term_2 = kl_divergence(mu, log_var)
+            L_E_term_3 = F.relu(self.params["m_z"] - kl_divergence(mu_r, log_var_r))
+            L_E_term_4 = F.relu(self.params["m_z"] - kl_divergence(mu_a_r, log_var_a_r))
+
+            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params[
+                "gamma"] * L_E_term_4
+
+            loss = torch.mean(L_E, dim=0)
+
+            return {"loss": loss,
+                    "loss_E": loss,
+                    "loss_summary": self.summary_loss + loss,
+                    "mu": torch.mean(self.mu),
+                    "var": torch.mean(self.log_var.exp())}
+
+    def training_step(self, batch, batch_idx, optimizer_idx=0):
+        real_img, labels = batch
+        self.curr_device = real_img.device
+
+        results = self.forward(real_img, optimizer_idx=optimizer_idx)
+        train_loss = self.loss_function(results,
+                                        M_N=self.params['batch_size'] / self.num_train_imgs,
+                                        optimizer_idx=optimizer_idx,
+                                        batch_idx=batch_idx)
+
+        self.logger.experiment.log({key: val.item() for key, val in train_loss.items()})
+
+        return train_loss
+
+    def validation_step(self, batch, batch_idx, optimizer_idx=0):
+        real_img, labels = batch
+        self.curr_device = real_img.device
+
+        results = self.forward(real_img, optimizer_idx=optimizer_idx)
+        val_loss = self.loss_function(results,
+                                      M_N=self.params['batch_size'] / self.num_val_imgs,
+                                      optimizer_idx=optimizer_idx,
+                                      batch_idx=batch_idx)
+
+        return val_loss
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+
+        if self.current_epoch % 1 == 0 or self.current_epoch == (self.trainer.max_epochs - 1):
+            self.sample_images()
+
+        self.logger.experiment.log({'avg_val_loss': avg_loss})
+
+        return {'val_loss': avg_loss}
+
+    @staticmethod
+    def denormalize(x: torch.Tensor):
+        return (x + 1) / 2.0
+
+    def sample_images(self):
+        # Get sample reconstruction image
+        test_input, test_label = next(iter(self.sample_dataloader))
+        test_input = test_input.to(self.curr_device)
+        test_label = test_label.to(self.curr_device)
+
+        recons, synthesized_anomalies = self.generate(test_input, labels=test_label)
+        samples_normal, samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
+
+        # Using denormalize() to get images back to [0, 1] range
+        self.logger.experiment.add_images("originals",
+                                          self.denormalize(test_input),
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("reconstructions",
+                                          self.denormalize(recons),
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("reconstructed anomalies",
+                                          self.denormalize(synthesized_anomalies),
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples",
+                                          self.denormalize(samples),
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("samples_normal",
+                                          self.denormalize(samples_normal),
+                                          global_step=self.current_epoch)
+
+    def configure_optimizers(self):
+        """
+        Configures two optimizers, the first for the decoder and transformer and the second for the encoder.
+        This means that training_step and validation_step are called twice for each mini-batch, once per optimizer.
+
+        Each optimizer only changes the weights which it received in the constructor below.
+        """
+        decoder_optimizer = optim.Adam(
+            self.decoder.parameters(),
+            lr=self.params['LR'],
+            weight_decay=self.params['weight_decay']
+        )
+
+        encoder_optimizer = optim.Adam(
+            self.encoder.parameters(),
+            lr=self.params['LR'],
+            weight_decay=self.params['weight_decay']
+        )
+
+        return [decoder_optimizer, encoder_optimizer]
+
+    def sample(self, batch_size: int, current_device: int, **kwargs):
+        z_normal = torch.randn(batch_size, self.latent_dim).to(current_device)
+
+        distribution = Normal(loc=torch.mean(self.mu),
+                              scale=torch.mean(self.log_var.exp()))
+
+        z = distribution.sample((batch_size, self.latent_dim)).to(current_device)
+
+        return self.decoder(z_normal), self.decoder(z)
+
+    def generate(self, x: torch.Tensor, **kwargs):
+        results = self.forward(x)
+
+        return results["x_r"], results["x_a_r"]
