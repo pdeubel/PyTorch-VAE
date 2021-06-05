@@ -1,0 +1,28 @@
+model_params:
+  name: 'adVAEAnomaly'
+  in_channels: 3
+  latent_dim: 128
+  hidden_dims: [32, 64, 128, 256, 512]
+
+exp_params:
+  dataset: concrete-cracks
+  data_path: "/cvhci/data/construction/Concrete-Cracks"
+  # dataset: SDNET2018
+  # data_path: "/cvhci/data/construction/SDNET2018"
+  img_size: 64
+  batch_size: 32 # Better to have a square number
+  LR: 0.0001
+  weight_decay: 0.0
+  gamma: 0.0001
+  m_x: 1
+  m_z: 1
+  lambda_G: 10.0
+
+trainer_params:
+  gpus: [3]
+  max_epochs: 20
+
+logging_params:
+  save_dir: "/cvhci/temp/p21g3/PyTorch-VAE/logs/"
+  name: "adVAEAnomaly"
+  manual_seed: 100
