@@ -300,7 +300,10 @@ class adVAE(BaseVAE):
             loss = torch.mean(L_E, dim=0)
 
             return {"loss": loss,
-                    "loss_summary": self.summary_loss + loss}
+                    "loss_E": loss,
+                    "loss_summary": self.summary_loss + loss,
+                    "mu": torch.mean(self.mu),
+                    "var": torch.mean(self.log_var.exp())}
 
     def training_step(self, batch, batch_idx, optimizer_idx=0):
         real_img, labels = batch
@@ -372,7 +375,6 @@ class adVAE(BaseVAE):
                                           self.denormalize(samples_normal),
                                           global_step=self.current_epoch)
 
-
     def configure_optimizers(self):
         """
         Configures two optimizers, the first for the decoder and transformer and the second for the encoder.
@@ -397,8 +399,8 @@ class adVAE(BaseVAE):
     def sample(self, batch_size: int, current_device: int, **kwargs):
         z_normal = torch.randn(batch_size, self.latent_dim).to(current_device)
 
-        distribution = Normal(loc=torch.mean(torch.sum(self.mu, dim=1), dim=0),
-                              scale=torch.mean(torch.sum(self.log_var.exp(), dim=1), dim=0))
+        distribution = Normal(loc=torch.mean(self.mu),
+                              scale=torch.mean(self.log_var.exp()))
 
         z = distribution.sample((batch_size, self.latent_dim)).to(current_device)
 
