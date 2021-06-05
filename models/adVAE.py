@@ -532,20 +532,20 @@ class adVAEAnomaly(BaseVAE):
 
             L_G_z_term_1 = F.mse_loss(x, x_r)
             L_G_z_term_2 = kl_divergence(mu_r, log_var_r)
-            L_G_z = L_G_z_term_1 + kld_weight * L_G_z_term_2
+            L_G_z = L_G_z_term_1 + self.params["gamma"] * L_G_z_term_2
 
             L_G_z_T_term_1 = F.relu(self.params["m_x"] - F.mse_loss(x_r, x_a_r))
             L_G_z_T_term_2 = F.relu(self.params["m_z"] - kl_divergence(mu_a_r, log_var_a_r))
 
-            L_G_z_T = L_G_z_T_term_1 + L_G_z_T_term_2
+            L_G_z_T = L_G_z_T_term_1 + self.params["gamma"] * L_G_z_T_term_2
 
-            L_G = L_G_z + self.params["gamma"] * L_G_z_T
+            L_G = L_G_z + L_G_z_T
 
-            loss = torch.mean((self.params["gamma"] * L_T) + (self.params["lambda_G"] * L_G), dim=0)
+            loss = torch.mean(L_T + (kld_weight * L_G), dim=0)
 
             # This is used for logging
-            loss_T = torch.mean(self.params["gamma"] * L_T, dim=0)
-            loss_G = torch.mean(self.params["lambda_G"] * L_G, dim=0)
+            loss_T = torch.mean(L_T, dim=0)
+            loss_G = torch.mean(kld_weight * L_G, dim=0)
 
             # This is used when loss_function is called with optimizer_idx=1, then the encoder loss is added and
             # the summed loss of generator+transformer and encoder is logged
@@ -561,8 +561,10 @@ class adVAEAnomaly(BaseVAE):
             L_E_term_3 = F.relu(self.params["m_z"] - kl_divergence(mu_r, log_var_r))
             L_E_term_4 = F.relu(self.params["m_z"] - kl_divergence(mu_a_r, log_var_a_r))
 
-            L_E = L_E_term_1 + kld_weight * L_E_term_2 + self.params["gamma"] * L_E_term_3 + self.params[
-                "gamma"] * L_E_term_4
+            L_E = (L_E_term_1 +
+                   kld_weight * L_E_term_2 +
+                   self.params["gamma"] * L_E_term_3 +
+                   self.params["gamma"] * L_E_term_4)
 
             loss = torch.mean(L_E, dim=0)
 
