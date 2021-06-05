@@ -485,6 +485,7 @@ class adVAEAnomaly(BaseVAE):
         mu_a_r, log_var_a_r, _ = self.encode(x_a_r)
 
         return {"x": x,
+                "x_a": x_a,
                 "x_r": x_r,
                 "x_a_r": x_a_r,
                 "mu": self.mu,
@@ -617,7 +618,7 @@ class adVAEAnomaly(BaseVAE):
         test_input = test_input.to(self.curr_device)
         test_label = test_label.to(self.curr_device)
 
-        recons, synthesized_anomalies = self.generate(test_input, labels=test_label)
+        recons, synthesized_anomalies, anomalies = self.generate(test_input, labels=test_label)
         samples_normal, samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
 
         # Using denormalize() to get images back to [0, 1] range
@@ -627,6 +628,10 @@ class adVAEAnomaly(BaseVAE):
 
         self.logger.experiment.add_images("reconstructions",
                                           self.denormalize(recons),
+                                          global_step=self.current_epoch)
+
+        self.logger.experiment.add_images("anomalies",
+                                          self.denormalize(anomalies),
                                           global_step=self.current_epoch)
 
         self.logger.experiment.add_images("reconstructed anomalies",
@@ -675,4 +680,4 @@ class adVAEAnomaly(BaseVAE):
     def generate(self, x: torch.Tensor, **kwargs):
         results = self.forward(x)
 
-        return results["x_r"], results["x_a_r"]
+        return results["x_r"], results["x_a_r"], results["x_a"]
