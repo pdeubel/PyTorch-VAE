@@ -9,7 +9,6 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import CelebA, MNIST
-from torchvision.utils import make_grid
 
 from datasets.concrete_cracks import ConcreteCracksDataset
 from datasets.sdnet2018 import SDNet2018
@@ -30,6 +29,9 @@ class BaseVAE(pl.LightningModule):
             num_workers = 0
 
         self.additional_dataloader_args = {'num_workers': num_workers, 'pin_memory': True}
+
+        # Used for visualizing
+        self.denormalize = lambda x: (x + 1.0) / 2.0
 
     def encode(self, input: Tensor) -> List[Tensor]:
         raise NotImplementedError
@@ -142,22 +144,19 @@ class BaseVAE(pl.LightningModule):
         test_label = test_label.to(self.curr_device)
 
         recons = self.generate(test_input, labels=test_label)
+        samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
+
+        self.logger.experiment.add_images("originals",
+                                          self.denormalize(test_input),
+                                          global_step=self.current_epoch)
 
         self.logger.experiment.add_images("reconstructions",
-                                          make_grid(recons, normalize=True, nrow=12),  # Use make_grid to normalize
-                                          global_step=self.current_epoch,
-                                          dataformats='CWH')  # make_grid seems to return channel x width x height
+                                          self.denormalize(recons),
+                                          global_step=self.current_epoch)
 
-        try:
-            samples = self.sample(144, self.curr_device, labels=test_label)
-            self.logger.experiment.add_images("samples",
-                                              make_grid(samples, normalize=True, nrow=12),
-                                              global_step=self.current_epoch,
-                                              dataformats='CWH')
-        except:
-            pass
-
-        del test_input, recons  # , samples
+        self.logger.experiment.add_images("samples",
+                                          self.denormalize(samples),
+                                          global_step=self.current_epoch)
 
     def configure_optimizers(self):
 
@@ -267,6 +266,9 @@ class BaseVAE(pl.LightningModule):
                                             SetRange])
         elif self.params['dataset'] == 'MNIST':
             transform = transforms.Compose([transforms.ToTensor()])
+
+            # Since we do not transform the input here set the denormalizing function to the identity function
+            self.denormalize = lambda x: x
         else:
             raise ValueError('Undefined dataset type')
         return transform
