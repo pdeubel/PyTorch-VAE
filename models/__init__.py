@@ -24,6 +24,7 @@ from .vq_vae import *
 from .betatc_vae import *
 from .dip_vae import *
 from .vanilla_vae_unet import *
+from .AnoVAEGAN import AnoVAEGAN
 
 
 # Aliases
@@ -55,4 +56,5 @@ vae_models = {'HVAE':HVAE,
               'VanillaVAE_third':VanillaVAE_third,
               'ConditionalVAE':ConditionalVAE,
               'CategoricalVAE':CategoricalVAE,
-              'VanillaVAEUNet':VanillaVAEUNet}
+              'VanillaVAEUNet':VanillaVAEUNet,
+              'AnoVAEGAN': AnoVAEGAN}
