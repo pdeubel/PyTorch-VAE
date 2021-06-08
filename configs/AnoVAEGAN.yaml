@@ -1,0 +1,25 @@
+model_params:
+  name: 'AnoVAEGAN'
+  in_channels: 3
+  latent_dim: 128
+  noise_type: mask
+  noise: 0
+
+exp_params:
+  dataset: SDNET2018
+  data_path: "/home/lei/Desktop/project-cvhci/data/SDNET2018"
+  img_size: 128
+  batch_size: 8 # Better to have a square number
+  LR1: 0.005
+  LR2: 0.0001
+  weight_decay: 0.0
+  scheduler_gamma: 0  #0.95
+
+trainer_params:
+  gpus: [0]
+  max_epochs: 50
+
+logging_params:
+  save_dir: "/home/lei/Desktop/project-cvhci/code/PyTorch-VAE-master/logs/"
+  name: "AnoVAEGAN"
+  manual_seed: 1265
