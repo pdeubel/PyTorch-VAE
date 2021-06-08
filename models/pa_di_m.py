@@ -1,6 +1,14 @@
 from typing import Any, List
 
+import matplotlib
 import numpy as np
+from matplotlib import pyplot as plt
+from skimage import morphology
+from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_curve
+from scipy.spatial.distance import mahalanobis
+from skimage.segmentation import mark_boundaries
+from scipy.ndimage import gaussian_filter
 import torch
 import torch.nn.functional as F
 from torchvision.models import resnet18, wide_resnet50_2
@@ -11,7 +19,6 @@ from models.types_ import Tensor
 
 
 class PaDiM(BaseVAE):
-
     """
     Patch Distribution Modeling (PaDiM) architecture. This is not a VAE but uses a pretrained CNN to get
     embedded features of the image to detect anomalies.
@@ -23,11 +30,11 @@ class PaDiM(BaseVAE):
 
     def __init__(self,
                  params: dict,
-                 crop_size: int = 224) -> None:
+                 **kwargs) -> None:
 
         super().__init__(params)
 
-        self.crop_size = crop_size
+        self.crop_size = self.params["crop_size"]
 
         if self.params["arch"] == "resnet":
             self.model = resnet18(pretrained=True)
@@ -52,12 +59,18 @@ class PaDiM(BaseVAE):
         def hook_3(module, input, output):
             self.outputs_layer3.append(output)
 
-        # Simply save the outputs of the layers 1 to 3 after the forward pass
+        # Simply save the outputs of the layers 1 to 3 after each forward pass
         self.model.layer1[-1].register_forward_hook(hook_1)
         self.model.layer2[-1].register_forward_hook(hook_2)
         self.model.layer3[-1].register_forward_hook(hook_3)
 
         self.learned_mean, self.learned_cov = None, None
+
+        self.anomaly_dataloader = self.get_dataloader(train_split=False, abnormal_data=True)[0]
+        self.anomaly_data_iterator = iter(self.anomaly_dataloader)
+
+        self.val_images = []
+        self.gt_list = []
 
     @staticmethod
     def embedding_concat(x, y):
@@ -77,6 +90,7 @@ class PaDiM(BaseVAE):
     def forward(self, inputs: Tensor) -> Tensor:
         _ = self.model(inputs)
 
+        return None
 
     def encode(self, input: Tensor) -> List[Tensor]:
         pass
@@ -90,41 +104,191 @@ class PaDiM(BaseVAE):
     def loss_function(self, *inputs: Any, **kwargs) -> Tensor:
         pass
 
-    def training_step(self, batch, batch_idx, optimizer_idx=0):
-        x, labels = batch
-
-        self.forward(x)
-
-        return None
-
-    def training_epoch_end(self, outputs) -> None:
+    def get_embedding(self):
         embedding = torch.cat(self.outputs_layer1, dim=0)
         embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer2, dim=0))
         embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer3, dim=0))
+
+        self.outputs_layer1 = []
+        self.outputs_layer2 = []
+        self.outputs_layer3 = []
 
         # randomly select d dimension
         # embedding_vectors = torch.index_select(embedding_vectors, 1, idx)
         # calculate multivariate Gaussian distribution
         B, C, H, W = embedding.size()
-        embedding = embedding.view(B, C, H * W)
+
+        return embedding.view(B, C, H * W), B, C, H, W
+
+    def training_step(self, batch, batch_idx, optimizer_idx=0):
+        if len(self.outputs_layer1) <= 5:
+            x, labels = batch
+            with torch.no_grad():
+                _ = self.forward(x)
+
+        return None
+
+    def training_epoch_end(self, outputs) -> None:
+        embedding, B, C, H, W = self.get_embedding()
         mean = torch.mean(embedding, dim=0).numpy()
         cov = torch.zeros(C, C, H * W).numpy()
         I = np.identity(C)
         for i in range(H * W):
             # cov[:, :, i] = LedoitWolf().fit(embedding_vectors[:, :, i].numpy()).covariance_
             cov[:, :, i] = np.cov(embedding[:, :, i].numpy(), rowvar=False) + 0.01 * I
-        # save learned distribution
 
+        # Save learned distribution
         self.learned_mean = mean
         self.learned_cov = cov
+
+    @staticmethod
+    def denormalization(x):
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        x = (((x.transpose(1, 2, 0) * std) + mean) * 255.).astype(np.uint8)
+
+        return x
 
     def data_transforms(self):
         mean = [0.485, 0.456, 0.406]
         std = [0.229, 0.224, 0.225]
-        self.denormalize = lambda x: (x * std) + mean
 
         return transforms.Compose([transforms.CenterCrop(self.crop_size),
                                    transforms.ToTensor(),
                                    transforms.Normalize(mean=mean,
                                                         std=std)])
 
+    def validation_step(self, batch, batch_idx, optimizer_idx=0):
+        if len(self.outputs_layer1) <= 2:
+            normal_x, normal_label = batch
+
+            try:
+                abnormal_x, abnormal_label = next(self.anomaly_data_iterator)
+            except StopIteration:
+                self.anomaly_data_iterator = iter(self.anomaly_dataloader)
+                abnormal_x, abnormal_label = next(self.anomaly_data_iterator)
+
+            with torch.no_grad():
+                _ = self.forward(normal_x)
+                _ = self.forward(abnormal_x)
+
+            self.val_images.extend(normal_x.numpy())
+            self.val_images.extend(abnormal_x.numpy())
+
+            self.gt_list.extend(normal_label.numpy())
+            self.gt_list.extend(abnormal_label.numpy())
+
+    def validation_epoch_end(self, outputs):
+        embedding, B, C, H, W = self.get_embedding()
+
+        dist_list = []
+        for i in range(H * W):
+            mean = self.learned_mean[:, i]
+            conv_inv = np.linalg.inv(self.learned_cov[:, :, i])
+            dist = [mahalanobis(sample[:, i], mean, conv_inv) for sample in embedding]
+            dist_list.append(dist)
+
+        dist_list = np.array(dist_list).transpose((1, 0)).reshape((B, H, W))
+
+        # upsample
+        dist_list = torch.tensor(dist_list)
+        score_map = F.interpolate(dist_list.unsqueeze(1), size=self.crop_size, mode='bilinear',
+                                  align_corners=False).squeeze().numpy()
+
+        # apply gaussian smoothing on the score map
+        for i in range(score_map.shape[0]):
+            score_map[i] = gaussian_filter(score_map[i], sigma=4)
+
+        # Normalization
+        max_score = score_map.max()
+        min_score = score_map.min()
+        scores = (score_map - min_score) / (max_score - min_score)
+
+        # calculate image-level ROC AUC score
+        img_scores = scores.reshape(scores.shape[0], -1).max(axis=1)
+        gt_list = np.asarray(self.gt_list)
+        fpr, tpr, thresholds = roc_curve(gt_list, img_scores)
+        img_roc_auc = roc_auc_score(gt_list, img_scores)
+
+        fig, ax = plt.subplots(1, 1)
+        fig_img_rocauc = ax
+
+        fig_img_rocauc.plot(fpr, tpr, label="ROC Curve (area = {:.2f})".format(img_roc_auc))
+        ax.set_xlabel("FPR")
+        ax.set_ylabel("TPR")
+        ax.set_title('Receiver operating characteristic')
+        ax.legend(loc="lower right")
+
+        self.logger.experiment.add_figure("ROC Curve",
+                                          fig,
+                                          global_step=self.current_epoch)
+
+        best_threshold = thresholds[np.argmax(tpr - fpr)]
+
+        self.plot_fig(scores, best_threshold)
+
+        self.gt_list = []
+        self.val_images = []
+
+    def plot_fig(self, scores, threshold):
+        num = len(scores)
+        vmax = scores.max() * 255.
+        vmin = scores.min() * 255.
+
+        for i in range(num):
+            img = self.val_images[i]
+            img = self.denormalization(img)
+            # gt = gts[i].transpose(1, 2, 0).squeeze()
+            heat_map = scores[i] * 255
+            mask = scores[i]
+            mask[mask > threshold] = 1
+            mask[mask <= threshold] = 0
+            kernel = morphology.disk(4)
+            mask = morphology.opening(mask, kernel)
+            mask *= 255
+            vis_img = mark_boundaries(img, mask, color=(1, 0, 0), mode='thick')
+            fig_img, ax_img = plt.subplots(1, 4, figsize=(12, 3))
+            fig_img.subplots_adjust(right=0.9)
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            for ax_i in ax_img:
+                ax_i.axes.xaxis.set_visible(False)
+                ax_i.axes.yaxis.set_visible(False)
+            ax_img[0].imshow(img)
+            ax_img[0].title.set_text('Image')
+            ax = ax_img[1].imshow(heat_map, cmap='jet', norm=norm)
+            ax_img[1].imshow(img, cmap='gray', interpolation='none')
+            ax_img[1].imshow(heat_map, cmap='jet', alpha=0.5, interpolation='none')
+            ax_img[1].title.set_text('Predicted heat map')
+            ax_img[2].imshow(mask, cmap='gray')
+            ax_img[2].title.set_text('Predicted mask')
+            ax_img[3].imshow(vis_img)
+            ax_img[3].title.set_text('Segmentation result')
+            left = 0.92
+            bottom = 0.15
+            width = 0.015
+            height = 1 - 2 * bottom
+            rect = [left, bottom, width, height]
+            cbar_ax = fig_img.add_axes(rect)
+            cb = plt.colorbar(ax, shrink=0.6, cax=cbar_ax, fraction=0.046)
+            cb.ax.tick_params(labelsize=8)
+            font = {
+                'family': 'serif',
+                'color': 'black',
+                'weight': 'normal',
+                'size': 8,
+            }
+            cb.set_label('Anomaly Score', fontdict=font)
+
+            if self.gt_list[i] == 0:
+                type_of_img = "Normal"
+            else:
+                type_of_img = "Abnormal"
+
+            self.logger.experiment.add_figure("Validation Image {} - {}".format(i, type_of_img),
+                                              fig_img,
+                                              global_step=self.current_epoch)
+
+        plt.close()
+
+    def configure_optimizers(self):
+        pass

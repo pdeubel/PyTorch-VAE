@@ -26,6 +26,7 @@ from .dip_vae import DIPVAE
 from .vanilla_vae_unet import VanillaVAEUNet
 from .adVAE import adVAE, adVAEAnomaly
 from .adVAE_MNIST import adVAEMNIST
+from .pa_di_m import PaDiM
 
 # Aliases
 VAE = VanillaVAE
@@ -59,4 +60,5 @@ vae_models = {'HVAE': HVAE,
               'VanillaVAEUNet': VanillaVAEUNet,
               'adVAE': adVAE,
               'adVAEAnomaly': adVAEAnomaly,
-              'adVAEMNIST': adVAEMNIST}
+              'adVAEMNIST': adVAEMNIST,
+              'PaDiM': PaDiM}
