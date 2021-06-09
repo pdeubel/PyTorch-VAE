@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from skimage import morphology
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import roc_curve
+from sklearn.metrics import precision_recall_curve
 from scipy.spatial.distance import mahalanobis
 from skimage.segmentation import mark_boundaries
 from scipy.ndimage import gaussian_filter
@@ -35,6 +36,8 @@ class PaDiM(BaseVAE):
         super().__init__(params)
 
         self.crop_size = self.params["crop_size"]
+        self.number_train_batches = self.params["number_train_batches"]
+        self.number_val_batches = self.params["number_val_batches"]
 
         if self.params["arch"] == "resnet":
             self.model = resnet18(pretrained=True)
@@ -121,7 +124,7 @@ class PaDiM(BaseVAE):
         return embedding.view(B, C, H * W), B, C, H, W
 
     def training_step(self, batch, batch_idx, optimizer_idx=0):
-        if len(self.outputs_layer1) <= 5:
+        if len(self.outputs_layer1) <= self.number_train_batches:
             x, labels = batch
             with torch.no_grad():
                 _ = self.forward(x)
@@ -159,7 +162,10 @@ class PaDiM(BaseVAE):
                                                         std=std)])
 
     def validation_step(self, batch, batch_idx, optimizer_idx=0):
-        if len(self.outputs_layer1) <= 2:
+        if self.learned_mean is None or self.learned_cov is None:
+            return
+
+        if len(self.outputs_layer1) <= self.number_val_batches:
             normal_x, normal_label = batch
 
             try:
@@ -179,6 +185,9 @@ class PaDiM(BaseVAE):
             self.gt_list.extend(abnormal_label.numpy())
 
     def validation_epoch_end(self, outputs):
+        if self.learned_mean is None or self.learned_cov is None:
+            return
+
         embedding, B, C, H, W = self.get_embedding()
 
         dist_list = []
@@ -223,7 +232,11 @@ class PaDiM(BaseVAE):
                                           fig,
                                           global_step=self.current_epoch)
 
-        best_threshold = thresholds[np.argmax(tpr - fpr)]
+        precision, recall, thresholds = precision_recall_curve(gt_list, img_scores)
+        a = 2 * precision * recall
+        b = precision + recall
+        f1 = np.divide(a, b, out=np.zeros_like(a), where=b != 0)
+        best_threshold = thresholds[np.argmax(f1)]
 
         self.plot_fig(scores, best_threshold)
 
