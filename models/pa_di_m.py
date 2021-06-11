@@ -38,6 +38,8 @@ class PaDiM(BaseVAE):
         self.crop_size = self.params["crop_size"]
         self.number_train_batches = self.params["number_train_batches"]
         self.number_val_batches = self.params["number_val_batches"]
+        self.calculated_train_batches = 0
+        self.calculated_val_batches = 0
 
         if self.params["arch"] == "resnet":
             self.model = resnet18(pretrained=True)
@@ -125,31 +127,33 @@ class PaDiM(BaseVAE):
         return embedding.view(B, C, H * W), B, C, H, W
 
     def training_step(self, batch, batch_idx, optimizer_idx=0):
-        if len(self.outputs_layer1) <= self.number_train_batches:
+        if self.calculated_train_batches < self.number_train_batches:
             x, labels = batch
             with torch.no_grad():
                 _ = self.forward(x)
 
-        embeddings, B, C, H, W = self.get_embedding()
+            embeddings, B, C, H, W = self.get_embedding()
 
-        if self.means is None and self.covs is None and self.num_patches == 0 and self.num_embeddings == 0:
-            self.means = torch.zeros((W * H, C))
-            self.covs = torch.zeros((W * H, C, C))
-            self.num_patches = W * H
-            self.num_embeddings = C
+            if self.means is None and self.covs is None and self.num_patches == 0 and self.num_embeddings == 0:
+                self.means = torch.zeros((W * H, C))
+                self.covs = torch.zeros((W * H, C, C))
+                self.num_patches = W * H
+                self.num_embeddings = C
 
-        for i in range(H * W):
-            patch_embeddings = embeddings[:, :, i]  # b * c
-            for j in range(B):
-                self.covs[i, :, :] += torch.outer(
-                    patch_embeddings[j, :],
-                    patch_embeddings[j, :])  # c * c
-            self.means[i, :] += patch_embeddings.sum(dim=0)  # c
-        self.N += B  # number of images
+            for i in range(H * W):
+                patch_embeddings = embeddings[:, :, i]  # b * c
+                for j in range(B):
+                    self.covs[i, :, :] += torch.outer(
+                        patch_embeddings[j, :],
+                        patch_embeddings[j, :])  # c * c
+                self.means[i, :] += patch_embeddings.sum(dim=0)  # c
+            self.N += B  # number of images
 
-        self.outputs_layer1 = []
-        self.outputs_layer2 = []
-        self.outputs_layer3 = []
+            self.outputs_layer1 = []
+            self.outputs_layer2 = []
+            self.outputs_layer3 = []
+
+            self.calculated_train_batches += 1
 
         return None
 
@@ -190,7 +194,7 @@ class PaDiM(BaseVAE):
         if self.learned_mean is None or self.learned_cov is None:
             return
 
-        if len(self.outputs_layer1) <= self.number_val_batches:
+        if self.calculated_val_batches < self.number_val_batches:
             normal_x, normal_label = batch
 
             try:
@@ -208,6 +212,8 @@ class PaDiM(BaseVAE):
 
             self.gt_list.extend(normal_label.numpy())
             self.gt_list.extend(abnormal_label.numpy())
+
+            self.calculated_val_batches += 1
 
     def validation_epoch_end(self, outputs):
         if self.learned_mean is None or self.learned_cov is None:
