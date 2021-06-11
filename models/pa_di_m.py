@@ -69,6 +69,11 @@ class PaDiM(BaseVAE):
 
         self.learned_mean, self.learned_cov = None, None
 
+        self.means, self.covs = None, None
+        self.N = 0
+        self.num_patches = 0
+        self.num_embeddings = 0
+
         self.anomaly_dataloader = self.get_dataloader(train_split=False, abnormal_data=True)[0]
         self.anomaly_data_iterator = iter(self.anomaly_dataloader)
 
@@ -112,10 +117,6 @@ class PaDiM(BaseVAE):
         embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer2, dim=0))
         embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer3, dim=0))
 
-        self.outputs_layer1 = []
-        self.outputs_layer2 = []
-        self.outputs_layer3 = []
-
         # randomly select d dimension
         # embedding_vectors = torch.index_select(embedding_vectors, 1, idx)
         # calculate multivariate Gaussian distribution
@@ -129,20 +130,44 @@ class PaDiM(BaseVAE):
             with torch.no_grad():
                 _ = self.forward(x)
 
+        embeddings, B, C, H, W = self.get_embedding()
+
+        if self.means is None and self.covs is None and self.num_patches == 0 and self.num_embeddings == 0:
+            self.means = torch.zeros((W * H, C))
+            self.covs = torch.zeros((W * H, C, C))
+            self.num_patches = W * H
+            self.num_embeddings = C
+
+        for i in range(H * W):
+            patch_embeddings = embeddings[:, :, i]  # b * c
+            for j in range(B):
+                self.covs[i, :, :] += torch.outer(
+                    patch_embeddings[j, :],
+                    patch_embeddings[j, :])  # c * c
+            self.means[i, :] += patch_embeddings.sum(dim=0)  # c
+        self.N += B  # number of images
+
+        self.outputs_layer1 = []
+        self.outputs_layer2 = []
+        self.outputs_layer3 = []
+
         return None
 
     def training_epoch_end(self, outputs) -> None:
-        embedding, B, C, H, W = self.get_embedding()
-        mean = torch.mean(embedding, dim=0).numpy()
-        cov = torch.zeros(C, C, H * W).numpy()
-        I = np.identity(C)
-        for i in range(H * W):
-            # cov[:, :, i] = LedoitWolf().fit(embedding_vectors[:, :, i].numpy()).covariance_
-            cov[:, :, i] = np.cov(embedding[:, :, i].numpy(), rowvar=False) + 0.01 * I
+        means = self.means.detach().clone()
+        covs = self.covs.detach().clone()
 
-        # Save learned distribution
-        self.learned_mean = mean
-        self.learned_cov = cov
+        epsilon = 0.01
+
+        identity = torch.eye(self.num_embeddings).to(self.device)
+        means /= self.N
+        for i in range(self.num_patches):
+            covs[i, :, :] -= self.N * torch.outer(means[i, :], means[i, :])
+            covs[i, :, :] /= self.N - 1  # corrected covariance
+            covs[i, :, :] += epsilon * identity  # constant term
+
+        self.learned_mean = means
+        self.learned_cov = covs
 
     @staticmethod
     def denormalization(x):
@@ -192,8 +217,8 @@ class PaDiM(BaseVAE):
 
         dist_list = []
         for i in range(H * W):
-            mean = self.learned_mean[:, i]
-            conv_inv = np.linalg.inv(self.learned_cov[:, :, i])
+            mean = self.learned_mean[i, :]
+            conv_inv = np.linalg.inv(self.learned_cov[i, :, :])
             dist = [mahalanobis(sample[:, i], mean, conv_inv) for sample in embedding]
             dist_list.append(dist)
 
