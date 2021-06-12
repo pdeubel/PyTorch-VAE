@@ -36,15 +36,29 @@ class PaDiM(BaseVAE):
         super().__init__(params)
 
         self.crop_size = self.params["crop_size"]
-        self.number_train_batches = self.params["number_train_batches"]
-        self.number_val_batches = self.params["number_val_batches"]
+
+        try:
+            self.number_train_batches = self.params["number_train_batches"]
+        except KeyError:
+            self.number_train_batches = len(self.get_dataloader(train_split=True, abnormal_data=False)[0])
+
+        try:
+            self.number_val_batches = self.params["number_val_batches"]
+        except KeyError:
+            self.number_val_batches = len(self.get_dataloader(train_split=False, abnormal_data=False)[0])
+
         self.calculated_train_batches = 0
         self.calculated_val_batches = 0
 
         if self.params["arch"] == "resnet":
             self.model = resnet18(pretrained=True)
+            # max_embedding_size is the actual amount of embeddings that would result when using the net, but the paper
+            # suggests randomly selecting like a 100 dimensions of this. So we save this here and select a
+            # random amount of indices later in the constructor. These are then used in the get_embedding() method.
+            self.max_embedding_size = 448
         elif self.params["arch"] == "resnet_wide":
             self.model = wide_resnet50_2(pretrained=True)
+            self.max_embedding_size = 1792
         else:
             raise RuntimeError("'{}' is not supported for the 'arch' config parameter".format(self.params["arch"]))
 
@@ -69,18 +83,42 @@ class PaDiM(BaseVAE):
         self.model.layer2[-1].register_forward_hook(hook_2)
         self.model.layer3[-1].register_forward_hook(hook_3)
 
-        self.learned_mean, self.learned_cov = None, None
+        # Run one sample of a batch to get the number of patches. This equals the width and height of the first feature
+        # map
+        temporary_batch = next(iter(self.get_dataloader(train_split=True, abnormal_data=False)[0]))[0][0].unsqueeze(0)
+        _ = self.model(temporary_batch)
 
-        self.means, self.covs = None, None
         self.N = 0
-        self.num_patches = 0
-        self.num_embeddings = 0
+        self.num_embeddings = self.params["number_of_embeddings"]
+        _, C, H, W = self.outputs_layer1[0].size()
+        self.num_patches = H * W
+
+        # Empty the lists again
+        self.outputs_layer1 = []
+        self.outputs_layer2 = []
+        self.outputs_layer3 = []
+
+        # These indices will be used in the get_embedding() method to then have only num_embeddings instead of
+        # max_embedding_size. The paper states that this saves calculation time and is not critical to the model
+        # performance.
+        self.embedding_ids = torch.randperm(self.max_embedding_size)[:self.num_embeddings].to(self.device)
+
+        self.means = torch.zeros((self.num_patches, self.num_embeddings))
+        self.covs = torch.zeros((self.num_patches, self.num_embeddings, self.num_embeddings))
+
+        # Transform means and covs into a Parameter, this way the values inside them get saved when checkpoints are
+        # created by PyTorch Lightning. Also since we do not do backpropagation in the PaDiM architecture, disable the
+        # gradient. Otherwise there are some accessing errors which are caused by this casting to a Parameter object.
+        self.means = torch.nn.Parameter(self.means, requires_grad=False).to(self.device)
+        self.covs = torch.nn.Parameter(self.covs, requires_grad=False).to(self.device)
 
         self.anomaly_dataloader = self.get_dataloader(train_split=False, abnormal_data=True)[0]
         self.anomaly_data_iterator = iter(self.anomaly_dataloader)
 
         self.val_images = []
         self.gt_list = []
+
+        self.save_hyperparameters()
 
     @staticmethod
     def embedding_concat(x, y):
@@ -119,10 +157,14 @@ class PaDiM(BaseVAE):
         embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer2, dim=0))
         embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer3, dim=0))
 
-        # randomly select d dimension
-        # embedding_vectors = torch.index_select(embedding_vectors, 1, idx)
-        # calculate multivariate Gaussian distribution
+        embedding = torch.index_select(embedding, dim=1, index=self.embedding_ids)
+
         B, C, H, W = embedding.size()
+
+        # Empty the lists for the next batch
+        self.outputs_layer1 = []
+        self.outputs_layer2 = []
+        self.outputs_layer3 = []
 
         return embedding.view(B, C, H * W), B, C, H, W
 
@@ -134,12 +176,6 @@ class PaDiM(BaseVAE):
 
             embeddings, B, C, H, W = self.get_embedding()
 
-            if self.means is None and self.covs is None and self.num_patches == 0 and self.num_embeddings == 0:
-                self.means = torch.zeros((W * H, C))
-                self.covs = torch.zeros((W * H, C, C))
-                self.num_patches = W * H
-                self.num_embeddings = C
-
             for i in range(H * W):
                 patch_embeddings = embeddings[:, :, i]  # b * c
                 for j in range(B):
@@ -149,17 +185,13 @@ class PaDiM(BaseVAE):
                 self.means[i, :] += patch_embeddings.sum(dim=0)  # c
             self.N += B  # number of images
 
-            self.outputs_layer1 = []
-            self.outputs_layer2 = []
-            self.outputs_layer3 = []
-
             self.calculated_train_batches += 1
 
         return None
 
     def training_epoch_end(self, outputs) -> None:
-        means = self.means.detach().clone()
-        covs = self.covs.detach().clone()
+        means = self.means.clone()
+        covs = self.covs.clone()
 
         epsilon = 0.01
 
@@ -170,8 +202,8 @@ class PaDiM(BaseVAE):
             covs[i, :, :] /= self.N - 1  # corrected covariance
             covs[i, :, :] += epsilon * identity  # constant term
 
-        self.learned_mean = means
-        self.learned_cov = covs
+        self.means = torch.nn.Parameter(means, requires_grad=False)
+        self.covs = torch.nn.Parameter(covs, requires_grad=False)
 
     @staticmethod
     def denormalization(x):
@@ -191,7 +223,7 @@ class PaDiM(BaseVAE):
                                                         std=std)])
 
     def validation_step(self, batch, batch_idx, optimizer_idx=0):
-        if self.learned_mean is None or self.learned_cov is None:
+        if self.calculated_train_batches == 0:
             return
 
         if self.calculated_val_batches < self.number_val_batches:
@@ -216,15 +248,15 @@ class PaDiM(BaseVAE):
             self.calculated_val_batches += 1
 
     def validation_epoch_end(self, outputs):
-        if self.learned_mean is None or self.learned_cov is None:
+        if self.calculated_train_batches == 0:
             return
 
         embedding, B, C, H, W = self.get_embedding()
 
         dist_list = []
         for i in range(H * W):
-            mean = self.learned_mean[i, :]
-            conv_inv = np.linalg.inv(self.learned_cov[i, :, :])
+            mean = self.means[i, :]
+            conv_inv = np.linalg.inv(self.covs[i, :, :])
             dist = [mahalanobis(sample[:, i], mean, conv_inv) for sample in embedding]
             dist_list.append(dist)
 
@@ -273,6 +305,9 @@ class PaDiM(BaseVAE):
 
         self.gt_list = []
         self.val_images = []
+
+        self.calculated_train_batches = 0
+        self.calculated_val_batches = 0
 
     def plot_fig(self, scores, threshold):
         num = len(scores)
