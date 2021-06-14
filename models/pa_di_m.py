@@ -4,9 +4,7 @@ import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
 from skimage import morphology
-from sklearn.metrics import roc_auc_score
-from sklearn.metrics import roc_curve
-from sklearn.metrics import precision_recall_curve
+
 from scipy.spatial.distance import mahalanobis
 from skimage.segmentation import mark_boundaries
 from scipy.ndimage import gaussian_filter
@@ -17,6 +15,7 @@ from torchvision import transforms
 
 from models import BaseVAE
 from models.types_ import Tensor
+import utils.padim_utils as padim_utils
 
 
 class PaDiM(BaseVAE):
@@ -120,21 +119,6 @@ class PaDiM(BaseVAE):
 
         self.save_hyperparameters()
 
-    @staticmethod
-    def embedding_concat(x, y):
-        B, C1, H1, W1 = x.size()
-        _, C2, H2, W2 = y.size()
-        s = int(H1 / H2)
-        x = F.unfold(x, kernel_size=s, dilation=1, stride=s)
-        x = x.view(B, C1, -1, H2, W2)
-        z = torch.zeros(B, C1 + C2, x.size(2), H2, W2)
-        for i in range(x.size(2)):
-            z[:, :, i, :, :] = torch.cat((x[:, :, i, :, :], y), 1)
-        z = z.view(B, -1, H2 * W2)
-        z = F.fold(z, kernel_size=s, output_size=(H1, W1), stride=s)
-
-        return z
-
     def forward(self, inputs: Tensor) -> Tensor:
         _ = self.model(inputs)
 
@@ -152,29 +136,19 @@ class PaDiM(BaseVAE):
     def loss_function(self, *inputs: Any, **kwargs) -> Tensor:
         pass
 
-    def get_embedding(self):
-        embedding = torch.cat(self.outputs_layer1, dim=0)
-        embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer2, dim=0))
-        embedding = self.embedding_concat(embedding, torch.cat(self.outputs_layer3, dim=0))
-
-        embedding = torch.index_select(embedding, dim=1, index=self.embedding_ids)
-
-        B, C, H, W = embedding.size()
-
-        # Empty the lists for the next batch
-        self.outputs_layer1 = []
-        self.outputs_layer2 = []
-        self.outputs_layer3 = []
-
-        return embedding.view(B, C, H * W), B, C, H, W
-
     def training_step(self, batch, batch_idx, optimizer_idx=0):
         if self.calculated_train_batches < self.number_train_batches:
             x, labels = batch
             with torch.no_grad():
                 _ = self.forward(x)
 
-            embeddings, B, C, H, W = self.get_embedding()
+            embeddings, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
+                                                   self.embedding_ids)
+
+            # Empty the lists for the next batch
+            self.outputs_layer1 = []
+            self.outputs_layer2 = []
+            self.outputs_layer3 = []
 
             for i in range(H * W):
                 patch_embeddings = embeddings[:, :, i]  # b * c
@@ -247,61 +221,34 @@ class PaDiM(BaseVAE):
 
             self.calculated_val_batches += 1
 
-    def validation_epoch_end(self, outputs):
+    def validation_epoch_end(self, outputs, min_max_norm=True):
         if self.calculated_train_batches == 0:
             return
 
-        embedding, B, C, H, W = self.get_embedding()
+        embedding, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
+                                              self.embedding_ids)
 
-        dist_list = []
-        for i in range(H * W):
-            mean = self.means[i, :]
-            conv_inv = np.linalg.inv(self.covs[i, :, :])
-            dist = [mahalanobis(sample[:, i], mean, conv_inv) for sample in embedding]
-            dist_list.append(dist)
+        # Empty the lists for the next batch
+        self.outputs_layer1 = []
+        self.outputs_layer2 = []
+        self.outputs_layer3 = []
 
-        dist_list = np.array(dist_list).transpose((1, 0)).reshape((B, H, W))
+        scores = padim_utils.calculate_score_map(embedding, (B, C, H, W), self.means, self.covs, self.crop_size,
+                                                 min_max_norm=min_max_norm)
 
-        # upsample
-        dist_list = torch.tensor(dist_list)
-        score_map = F.interpolate(dist_list.unsqueeze(1), size=self.crop_size, mode='bilinear',
-                                  align_corners=False).squeeze().numpy()
-
-        # apply gaussian smoothing on the score map
-        for i in range(score_map.shape[0]):
-            score_map[i] = gaussian_filter(score_map[i], sigma=4)
-
-        # Normalization
-        max_score = score_map.max()
-        min_score = score_map.min()
-        scores = (score_map - min_score) / (max_score - min_score)
-
-        # calculate image-level ROC AUC score
-        img_scores = scores.reshape(scores.shape[0], -1).max(axis=1)
-        gt_list = np.asarray(self.gt_list)
-        fpr, tpr, thresholds = roc_curve(gt_list, img_scores)
-        img_roc_auc = roc_auc_score(gt_list, img_scores)
-
-        fig, ax = plt.subplots(1, 1)
-        fig_img_rocauc = ax
-
-        fig_img_rocauc.plot(fpr, tpr, label="ROC Curve (area = {:.2f})".format(img_roc_auc))
-        ax.set_xlabel("FPR")
-        ax.set_ylabel("TPR")
-        ax.set_title('Receiver operating characteristic')
-        ax.legend(loc="lower right")
+        (fig, _), best_threshold = padim_utils.get_roc_plot_and_threshold(scores, self.gt_list)
 
         self.logger.experiment.add_figure("ROC Curve",
                                           fig,
                                           global_step=self.current_epoch)
 
-        precision, recall, thresholds = precision_recall_curve(gt_list, img_scores)
-        a = 2 * precision * recall
-        b = precision + recall
-        f1 = np.divide(a, b, out=np.zeros_like(a), where=b != 0)
-        best_threshold = thresholds[np.argmax(f1)]
+        figures = self.get_plot_fig(scores, best_threshold)
 
-        self.plot_fig(scores, best_threshold)
+        for (i, _fig) in enumerate(figures):
+            fig_img, type_of_img = _fig
+            self.logger.experiment.add_figure("Validation Image {} - {}".format(i, type_of_img),
+                                              fig_img,
+                                              global_step=self.current_epoch)
 
         self.gt_list = []
         self.val_images = []
@@ -309,7 +256,8 @@ class PaDiM(BaseVAE):
         self.calculated_train_batches = 0
         self.calculated_val_batches = 0
 
-    def plot_fig(self, scores, threshold):
+    def get_plot_fig(self, scores, threshold):
+        figures = []
         num = len(scores)
         vmax = scores.max() * 255.
         vmin = scores.min() * 255.
@@ -363,11 +311,9 @@ class PaDiM(BaseVAE):
             else:
                 type_of_img = "Abnormal"
 
-            self.logger.experiment.add_figure("Validation Image {} - {}".format(i, type_of_img),
-                                              fig_img,
-                                              global_step=self.current_epoch)
+            figures.append((type_of_img, fig_img))
 
-        plt.close()
+        return figures
 
     def configure_optimizers(self):
         pass
