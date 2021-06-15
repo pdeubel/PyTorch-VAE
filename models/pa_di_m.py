@@ -241,10 +241,9 @@ class PaDiM(BaseVAE):
 
         figures = self.get_plot_fig(scores, best_threshold)
 
-        for (i, _fig) in enumerate(figures):
-            fig_img, type_of_img = _fig
-            self.logger.experiment.add_figure("Validation Image {} - {}".format(i, type_of_img),
-                                              fig_img,
+        for i, (classified_as, _fig) in enumerate(figures):
+            self.logger.experiment.add_figure("Validation Image Classified as {} - {}".format(classified_as, i),
+                                              _fig,
                                               global_step=self.current_epoch)
 
         self.gt_list = []

@@ -10,3 +10,4 @@ torchsummary
 torchvision
 matplotlib
 scikit-learn
+scikit-image
