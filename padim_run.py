@@ -1,16 +1,15 @@
 import argparse
-
-from matplotlib import pyplot as plt
-import numpy as np
 import os
 import shutil
+
+import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import yaml
 from pytorch_lightning.loggers import TestTubeLogger
 
-from models import PaDiM
 import utils.padim_utils as padim_utils
+from models import PaDiM
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
 parser.add_argument('--config', '-c',

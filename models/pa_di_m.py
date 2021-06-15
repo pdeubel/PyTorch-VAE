@@ -2,21 +2,16 @@ from typing import Any, List
 
 import matplotlib
 import numpy as np
-from matplotlib import pyplot as plt
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from skimage import morphology
-
-from scipy.spatial.distance import mahalanobis
-from skimage.segmentation import mark_boundaries
-from scipy.ndimage import gaussian_filter
 import torch
-import torch.nn.functional as F
-from torchvision.models import resnet18, wide_resnet50_2
+from matplotlib import pyplot as plt
+from skimage import morphology
+from skimage.segmentation import mark_boundaries
 from torchvision import transforms
+from torchvision.models import resnet18, wide_resnet50_2
 
+import utils.padim_utils as padim_utils
 from models import BaseVAE
 from models.types_ import Tensor
-import utils.padim_utils as padim_utils
 
 
 class PaDiM(BaseVAE):
@@ -63,7 +58,7 @@ class PaDiM(BaseVAE):
             raise RuntimeError("'{}' is not supported for the 'arch' config parameter".format(self.params["arch"]))
 
         self.model.eval()
-        self.model.to(self.curr_device)
+        self.model.to(self.device)
 
         self.outputs_layer1 = []
         self.outputs_layer2 = []
@@ -143,8 +138,9 @@ class PaDiM(BaseVAE):
             with torch.no_grad():
                 _ = self.forward(x)
 
-            embeddings, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
-                                                   self.embedding_ids)
+            embeddings, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2,
+                                                               self.outputs_layer3,
+                                                               self.embedding_ids)
 
             # Empty the lists for the next batch
             self.outputs_layer1 = []
@@ -227,7 +223,7 @@ class PaDiM(BaseVAE):
             return
 
         embedding, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
-                                              self.embedding_ids)
+                                                          self.embedding_ids)
 
         # Empty the lists for the next batch
         self.outputs_layer1 = []
@@ -256,7 +252,6 @@ class PaDiM(BaseVAE):
 
         self.calculated_train_batches = 0
         self.calculated_val_batches = 0
-
 
     def create_mask(self, img_score: np.ndarray, threshold):
         idx_above_threshold = img_score > threshold
