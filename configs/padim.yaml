@@ -1,0 +1,24 @@
+model_params:
+  name: 'PaDiM'
+
+exp_params:
+  dataset: concrete-cracks
+  data_path: "/cvhci/data/construction/Concrete-Cracks"
+  # dataset: SDNET2018
+  # data_path: "/cvhci/data/construction/SDNET2018"
+  batch_size: 32
+  crop_size: 224
+  arch: "resnet_wide"
+  number_of_embeddings: 100
+  # number_train_batches: 1 # Keep uncommented to use all training batches
+  number_val_batches: 2
+  dataloader_workers: 4
+
+trainer_params:
+  gpus: [3]
+  max_epochs: 1 # One epoch is enough because PaDiM needs to see each training sample only once
+
+logging_params:
+  save_dir: "/cvhci/temp/p21g3/PyTorch-VAE/logs/"
+  name: "PaDiM-WideResNet-50_2"
+  manual_seed: 100
