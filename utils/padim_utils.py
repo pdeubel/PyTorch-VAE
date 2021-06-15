@@ -49,12 +49,12 @@ def _embedding_concat(x, y):
     return z
 
 
-def get_embedding(outputs_layer1, outputs_layer2, outputs_layer3, embedding_ids):
-    embedding = torch.cat(outputs_layer1, dim=0)
-    embedding = _embedding_concat(embedding, torch.cat(outputs_layer2, dim=0))
-    embedding = _embedding_concat(embedding, torch.cat(outputs_layer3, dim=0))
+def get_embedding(outputs_layer1, outputs_layer2, outputs_layer3, embedding_ids, device):
+    embedding = torch.cat(outputs_layer1, dim=0).to(device)
+    embedding = _embedding_concat(embedding, torch.cat(outputs_layer2, dim=0)).to(device)
+    embedding = _embedding_concat(embedding, torch.cat(outputs_layer3, dim=0)).to(device)
 
-    embedding = torch.index_select(embedding, dim=1, index=embedding_ids)
+    embedding = torch.index_select(embedding, dim=1, index=embedding_ids).to(device)
 
     B, C, H, W = embedding.size()
 

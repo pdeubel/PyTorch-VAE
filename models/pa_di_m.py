@@ -140,7 +140,8 @@ class PaDiM(BaseVAE):
 
             embeddings, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2,
                                                                self.outputs_layer3,
-                                                               self.embedding_ids)
+                                                               self.embedding_ids,
+                                                               self.device)
 
             # Empty the lists for the next batch
             self.outputs_layer1 = []
@@ -206,15 +207,18 @@ class PaDiM(BaseVAE):
                 self.anomaly_data_iterator = iter(self.anomaly_dataloader)
                 abnormal_x, abnormal_label = next(self.anomaly_data_iterator)
 
+            abnormal_x = abnormal_x.to(self.device)
+            abnormal_label = abnormal_label.to(self.device)
+
             with torch.no_grad():
                 _ = self.forward(normal_x)
                 _ = self.forward(abnormal_x)
 
-            self.val_images.extend(normal_x.numpy())
-            self.val_images.extend(abnormal_x.numpy())
+            self.val_images.extend(normal_x.cpu().numpy())
+            self.val_images.extend(abnormal_x.cpu().numpy())
 
-            self.gt_list.extend(normal_label.numpy())
-            self.gt_list.extend(abnormal_label.numpy())
+            self.gt_list.extend(normal_label.cpu().numpy())
+            self.gt_list.extend(abnormal_label.cpu().numpy())
 
             self.calculated_val_batches += 1
 
@@ -223,15 +227,15 @@ class PaDiM(BaseVAE):
             return
 
         embedding, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
-                                                          self.embedding_ids)
+                                                          self.embedding_ids, self.device)
 
         # Empty the lists for the next batch
         self.outputs_layer1 = []
         self.outputs_layer2 = []
         self.outputs_layer3 = []
 
-        scores = padim_utils.calculate_score_map(embedding, (B, C, H, W), self.means, self.covs, self.crop_size,
-                                                 min_max_norm=min_max_norm)
+        scores = padim_utils.calculate_score_map(embedding.cpu(), (B, C, H, W), self.means.cpu(), self.covs.cpu(),
+                                                 self.crop_size, min_max_norm=min_max_norm)
 
         (fig, _), best_threshold = padim_utils.get_roc_plot_and_threshold(scores, self.gt_list)
 
@@ -239,12 +243,7 @@ class PaDiM(BaseVAE):
                                           fig,
                                           global_step=self.current_epoch)
 
-        figures = self.get_plot_fig(scores, best_threshold)
-
-        for i, (classified_as, _fig) in enumerate(figures):
-            self.logger.experiment.add_figure("Validation Image Classified as {} - {}".format(classified_as, i),
-                                              _fig,
-                                              global_step=self.current_epoch)
+        self.save_plot_figs(scores, best_threshold)
 
         self.gt_list = []
         self.val_images = []
@@ -309,7 +308,7 @@ class PaDiM(BaseVAE):
 
         return fig_img, ax_img
 
-    def get_plot_fig(self, scores, threshold):
+    def get_plot_figs(self, scores, threshold):
         figures = []
         num = len(scores)
         # vmax = scores.max() * 255.
@@ -323,9 +322,9 @@ class PaDiM(BaseVAE):
             fig_img, ax_img = self.create_img_subplot(self.val_images[i], scores[i], threshold=threshold, vmin=vmin,
                                                       vmax=vmax)
 
-            figures.append((classified_as, fig_img))
-
-        return figures
+            self.logger.experiment.add_figure("Validation Image Classified as {} - {}".format(classified_as, i),
+                                              fig_img,
+                                              global_step=self.current_epoch)
 
     def configure_optimizers(self):
         pass
