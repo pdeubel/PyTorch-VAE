@@ -2,6 +2,8 @@ import argparse
 
 from matplotlib import pyplot as plt
 import numpy as np
+import os
+import shutil
 import torch
 import torch.backends.cudnn as cudnn
 import yaml
@@ -44,6 +46,7 @@ cudnn.benchmark = False
 model = PaDiM(config['exp_params'], **config['model_params'])
 params = config['exp_params']
 params["dataloader_workers"] = 0
+params["batch_size"] = 4
 model = model.load_from_checkpoint(args.checkpoint_file, params=params)
 
 model.anomaly_dataloader = model.get_dataloader(train_split=False, abnormal_data=True)[0]
@@ -57,7 +60,7 @@ abnormal_val_dataloader_iter = iter(model.get_dataloader(train_split=False, abno
 
 model.calculated_train_batches = 1
 
-for i in range(2):
+for i in range(1):
     model.validation_step(batch=next(normal_val_dataloader_iter), batch_idx=i)
     model.validation_step(batch=next(abnormal_val_dataloader_iter), batch_idx=i)
 
@@ -72,13 +75,29 @@ model.outputs_layer3 = []
 scores = padim_utils.calculate_score_map(embedding, (B, C, H, W), model.means, model.covs, model.crop_size,
                                          min_max_norm=False)
 
-(fig, _), best_threshold = padim_utils.get_roc_plot_and_threshold(scores, model.gt_list)
-
-plt.show()
+(roc_auc_fig, _), best_threshold = padim_utils.get_roc_plot_and_threshold(scores, model.gt_list)
 
 figures = model.get_plot_fig(scores, best_threshold)
 
-for (i, _fig) in enumerate(figures):
-    fig_img, type_of_img = _fig
+experiment_dir = args.checkpoint_file.split("checkpoints")[0]
+dir_path = os.path.join(experiment_dir, "evaluation")
 
-    plt.show()
+try:
+    shutil.rmtree(dir_path)
+except FileNotFoundError:
+    # Has not been created
+    pass
+
+os.makedirs(dir_path, exist_ok=True)
+
+roc_auc_fig.savefig(os.path.join(dir_path, "roc_auc.png"))
+
+for i, (classified_as, _fig) in enumerate(figures):
+    if classified_as:
+        classified_as = "Anomaly"
+    else:
+        classified_as = "Normal"
+
+    _fig.savefig(os.path.join(dir_path, "classified_{}_{}.png".format(classified_as, i)))
+
+print("Saved ROC and some validation images to {}".format(dir_path))
