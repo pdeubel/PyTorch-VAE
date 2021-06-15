@@ -308,7 +308,7 @@ class PaDiM(BaseVAE):
 
         return fig_img, ax_img
 
-    def get_plot_figs(self, scores, threshold):
+    def save_plot_figs(self, scores, threshold):
         figures = []
         num = len(scores)
         # vmax = scores.max() * 255.
