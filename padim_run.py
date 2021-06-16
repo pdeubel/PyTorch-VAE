@@ -8,7 +8,6 @@ import torch.backends.cudnn as cudnn
 import yaml
 from pytorch_lightning.loggers import TestTubeLogger
 
-import utils.padim_utils as padim_utils
 from models import PaDiM
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
@@ -45,7 +44,7 @@ cudnn.benchmark = False
 model = PaDiM(config['exp_params'], **config['model_params'])
 params = config['exp_params']
 params["dataloader_workers"] = 0
-params["batch_size"] = 4
+# params["batch_size"] = 4
 model = model.load_from_checkpoint(args.checkpoint_file, params=params)
 
 model.anomaly_dataloader = model.get_dataloader(train_split=False, abnormal_data=True)[0]
@@ -54,29 +53,22 @@ model.anomaly_data_iterator = iter(model.anomaly_dataloader)
 # For debugging
 # model.params["data_path"] = "/home/pdeubel/PycharmProjects/data/Concrete-Crack-Images"
 
-normal_val_dataloader_iter = iter(model.get_dataloader(train_split=False, abnormal_data=False)[0])
-abnormal_val_dataloader_iter = iter(model.get_dataloader(train_split=False, abnormal_data=True)[0])
+normal_val_dataloader_iter, _ = model.get_dataloader(train_split=False, abnormal_data=False)
+abnormal_val_dataloader_iter, _ = model.get_dataloader(train_split=False, abnormal_data=True)
 
 model.calculated_train_batches = 1
 
-for i in range(1):
-    model.validation_step(batch=next(normal_val_dataloader_iter), batch_idx=i)
-    model.validation_step(batch=next(abnormal_val_dataloader_iter), batch_idx=i)
+for i, normal_batch in enumerate(normal_val_dataloader_iter):
+    model.validation_step(batch=normal_batch, batch_idx=i, number_of_batches=len(normal_val_dataloader_iter))
 
-embedding, B, C, H, W = padim_utils.get_embedding(model.outputs_layer1, model.outputs_layer2, model.outputs_layer3,
-                                                  model.embedding_ids)
+for i, abnormal_batch in enumerate(abnormal_val_dataloader_iter):
+    model.validation_step(batch=abnormal_batch, batch_idx=i, number_of_batches=len(abnormal_val_dataloader_iter))
 
-# Empty the lists for the next batch
-model.outputs_layer1 = []
-model.outputs_layer2 = []
-model.outputs_layer3 = []
+model.val_images_predicted = np.array(model.val_images_predicted).flatten()
 
-scores = padim_utils.calculate_score_map(embedding, (B, C, H, W), model.means, model.covs, model.crop_size,
-                                         min_max_norm=False)
+(roc_auc_fig, _), best_threshold = model.get_roc_plot_and_threshold()
 
-(roc_auc_fig, _), best_threshold = padim_utils.get_roc_plot_and_threshold(scores, model.gt_list)
-
-figures = model.get_plot_fig(scores, best_threshold)
+figures = model.save_plot_figs(model.val_images_scores_visualize, best_threshold)
 
 experiment_dir = args.checkpoint_file.split("checkpoints")[0]
 dir_path = os.path.join(experiment_dir, "evaluation")
@@ -93,10 +85,10 @@ roc_auc_fig.savefig(os.path.join(dir_path, "roc_auc.png"))
 
 for i, (classified_as, _fig) in enumerate(figures):
     if classified_as:
-        classified_as = "Anomaly"
+        classified_as_str = "Anomaly"
     else:
-        classified_as = "Normal"
+        classified_as_str = "Normal"
 
-    _fig.savefig(os.path.join(dir_path, "classified_{}_{}.png".format(classified_as, i)))
+    _fig.savefig(os.path.join(dir_path, "classified_{}_{}.png".format(classified_as_str, i)))
 
 print("Saved ROC and some validation images to {}".format(dir_path))

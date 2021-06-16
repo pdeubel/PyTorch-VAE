@@ -6,6 +6,10 @@ import torch
 from matplotlib import pyplot as plt
 from skimage import morphology
 from skimage.segmentation import mark_boundaries
+from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_curve
+from sklearn.metrics import precision_recall_curve
+from scipy.spatial.distance import mahalanobis
 from torchvision import transforms
 from torchvision.models import resnet18, wide_resnet50_2
 
@@ -100,18 +104,23 @@ class PaDiM(BaseVAE):
 
         self.means = torch.zeros((self.num_patches, self.num_embeddings))
         self.covs = torch.zeros((self.num_patches, self.num_embeddings, self.num_embeddings))
+        self.covs_inv = torch.zeros((self.num_patches, self.num_embeddings, self.num_embeddings))
 
         # Transform means and covs into a Parameter, this way the values inside them get saved when checkpoints are
         # created by PyTorch Lightning. Also since we do not do backpropagation in the PaDiM architecture, disable the
         # gradient. Otherwise there are some accessing errors which are caused by this casting to a Parameter object.
         self.means = torch.nn.Parameter(self.means, requires_grad=False).to(self.device)
         self.covs = torch.nn.Parameter(self.covs, requires_grad=False).to(self.device)
+        self.covs_inv = torch.nn.Parameter(self.covs_inv, requires_grad=False).to(self.device)
 
         self.anomaly_dataloader = self.get_dataloader(train_split=False, abnormal_data=True)[0]
         self.anomaly_data_iterator = iter(self.anomaly_dataloader)
 
         self.val_images = []
         self.gt_list = []
+
+        self.val_images_scores_visualize = None
+        self.val_images_predicted = []
 
         self.save_hyperparameters()
 
@@ -174,8 +183,12 @@ class PaDiM(BaseVAE):
             covs[i, :, :] /= self.N - 1  # corrected covariance
             covs[i, :, :] += epsilon * identity  # constant term
 
-        self.means = torch.nn.Parameter(means, requires_grad=False)
-        self.covs = torch.nn.Parameter(covs, requires_grad=False)
+        self.means = torch.nn.Parameter(means, requires_grad=False).to(self.device)
+        self.covs = torch.nn.Parameter(covs, requires_grad=False).to(self.device)
+        self.covs_inv = torch.nn.Parameter(torch.from_numpy(np.linalg.inv(self.covs.cpu().numpy())),
+                                           requires_grad=False).to(self.device)
+
+        print("hello")
 
     @staticmethod
     def denormalization(x):
@@ -194,11 +207,35 @@ class PaDiM(BaseVAE):
                                    transforms.Normalize(mean=mean,
                                                         std=std)])
 
-    def validation_step(self, batch, batch_idx, optimizer_idx=0):
+    def calculate_dist_list(self):
+        embedding, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
+                                                          self.embedding_ids, self.device)
+
+        dist_list = []
+
+        for i in range(H * W):
+            mean = self.means[i, :]
+            conv_inv = self.covs_inv[i, :, :]
+            dist = [mahalanobis(sample[:, i], mean, conv_inv) for sample in embedding]
+            dist_list.append(dist)
+
+        # delta =
+        # cdist(embedding[0], self.means.T, metric="mahalanobis", VI=self.covs_inv)
+
+        dist_list = np.array(dist_list).transpose((1, 0)).reshape((B, H, W))
+
+        return dist_list
+
+    def validation_step(self, batch, batch_idx, optimizer_idx=0, number_of_batches=None):
         if self.calculated_train_batches == 0:
             return
 
-        if self.calculated_val_batches < self.number_val_batches:
+        if number_of_batches is not None:
+            max_number_batches = number_of_batches
+        else:
+            max_number_batches = self.number_val_batches
+
+        if self.calculated_val_batches < max_number_batches:
             normal_x, normal_label = batch
 
             try:
@@ -214,36 +251,65 @@ class PaDiM(BaseVAE):
                 _ = self.forward(normal_x)
                 _ = self.forward(abnormal_x)
 
-            self.val_images.extend(normal_x.cpu().numpy())
-            self.val_images.extend(abnormal_x.cpu().numpy())
-
             self.gt_list.extend(normal_label.cpu().numpy())
             self.gt_list.extend(abnormal_label.cpu().numpy())
 
+            dist_list = self.calculate_dist_list()
+            score_map = padim_utils.calculate_score_map(dist_list, self.crop_size, min_max_norm=True)
+
+            # Save only one batch of scores for visualizing later (for memory reasons)
+            # For all other validation batches the predicted result is saved
+            if self.val_images_scores_visualize is None:
+                self.val_images_scores_visualize = np.copy(score_map)
+
+                self.val_images.extend(normal_x.cpu().numpy())
+                self.val_images.extend(abnormal_x.cpu().numpy())
+
+            self.val_images_predicted.append(score_map.reshape(score_map.shape[0], -1).max(axis=1))
+
+            # Empty the lists for the next batch
+            self.outputs_layer1 = []
+            self.outputs_layer2 = []
+            self.outputs_layer3 = []
+
             self.calculated_val_batches += 1
+
+    def get_roc_plot_and_threshold(self):
+        # calculate image-level ROC AUC score
+        gt_list = np.asarray(self.gt_list)
+        fpr, tpr, thresholds = roc_curve(gt_list, self.val_images_predicted)
+        img_roc_auc = roc_auc_score(gt_list, self.val_images_predicted)
+
+        fig, ax = plt.subplots(1, 1)
+        fig_img_rocauc = ax
+
+        fig_img_rocauc.plot(fpr, tpr, label="ROC Curve (area = {:.2f})".format(img_roc_auc))
+        ax.set_xlabel("FPR")
+        ax.set_ylabel("TPR")
+        ax.set_title('Receiver operating characteristic')
+        ax.legend(loc="lower right")
+
+        precision, recall, thresholds = precision_recall_curve(gt_list, self.val_images_predicted)
+        a = 2 * precision * recall
+        b = precision + recall
+        f1 = np.divide(a, b, out=np.zeros_like(a), where=b != 0)
+        best_threshold = thresholds[np.argmax(f1)]
+
+        return (fig, ax), best_threshold
 
     def validation_epoch_end(self, outputs, min_max_norm=True):
         if self.calculated_train_batches == 0:
             return
 
-        embedding, B, C, H, W = padim_utils.get_embedding(self.outputs_layer1, self.outputs_layer2, self.outputs_layer3,
-                                                          self.embedding_ids, self.device)
+        self.val_images_predicted = np.array(self.val_images_predicted).flatten()
 
-        # Empty the lists for the next batch
-        self.outputs_layer1 = []
-        self.outputs_layer2 = []
-        self.outputs_layer3 = []
-
-        scores = padim_utils.calculate_score_map(embedding.cpu(), (B, C, H, W), self.means.cpu(), self.covs.cpu(),
-                                                 self.crop_size, min_max_norm=min_max_norm)
-
-        (fig, _), best_threshold = padim_utils.get_roc_plot_and_threshold(scores, self.gt_list)
+        (fig, _), best_threshold = self.get_roc_plot_and_threshold()
 
         self.logger.experiment.add_figure("ROC Curve",
                                           fig,
                                           global_step=self.current_epoch)
 
-        self.save_plot_figs(scores, best_threshold)
+        self.save_plot_figs(self.val_images_scores_visualize, best_threshold)
 
         self.gt_list = []
         self.val_images = []

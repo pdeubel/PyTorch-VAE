@@ -61,24 +61,7 @@ def get_embedding(outputs_layer1, outputs_layer2, outputs_layer3, embedding_ids,
     return embedding.view(B, C, H * W), B, C, H, W
 
 
-def _calculate_dist_list(embedding, embedding_dimensions: tuple, means, covs):
-    B, C, H, W = embedding_dimensions
-
-    dist_list = []
-    for i in range(H * W):
-        mean = means[i, :]
-        conv_inv = np.linalg.inv(covs[i, :, :])
-        dist = [mahalanobis(sample[:, i], mean, conv_inv) for sample in embedding]
-        dist_list.append(dist)
-
-    dist_list = np.array(dist_list).transpose((1, 0)).reshape((B, H, W))
-
-    return dist_list
-
-
-def calculate_score_map(embedding, embedding_dimensions: tuple, means, covs, crop_size, min_max_norm: bool):
-    dist_list = _calculate_dist_list(embedding, embedding_dimensions, means, covs)
-
+def calculate_score_map(dist_list, crop_size, min_max_norm: bool):
     # Upsample
     dist_list = torch.tensor(dist_list)
     score_map = F.interpolate(dist_list.unsqueeze(1), size=crop_size, mode='bilinear',
