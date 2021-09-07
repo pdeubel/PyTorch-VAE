@@ -1,7 +1,7 @@
 import os
 
 import torch
-from PIL.Image import Image
+from PIL import Image
 from torch.utils.data import Dataset
 
 
@@ -28,7 +28,7 @@ class TestGUIDataset(Dataset):
         self.train_index = round(len(os.listdir(self.root_dir)) * self.train_split)
         self.val_index = round(len(os.listdir(self.root_dir)) * self.val_split)
 
-        self.train_length = len(os.listdir(self.root_dir))[:self.train_index]
+        self.train_length = len(os.listdir(self.root_dir)[:self.train_index])
         self.val_length = len(os.listdir(self.root_dir)[self.train_index:self.train_index + self.val_index])
         self.test_length = len(os.listdir(self.root_dir)[self.train_index + self.val_index:])
 
@@ -60,4 +60,4 @@ class TestGUIDataset(Dataset):
             img = self.transform(img)
 
         # None because we have no labels
-        return img, None
+        return img, torch.Tensor(0)
