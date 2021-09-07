@@ -10,8 +10,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import CelebA, MNIST
 
-from datasets.concrete_cracks import ConcreteCracksDataset
-from datasets.sdnet2018 import SDNet2018
+from datasets.test_gui_dataset import TestGUIDataset
 from models.types_ import Any, List, Tensor
 
 
@@ -82,13 +81,13 @@ class BaseVAE(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
 
-        if self.current_epoch % 1 == 0:
+        if self.current_epoch % 1 == 0 or self.current_epoch == (self.trainer.max_epochs - 1):
             self.sample_images()
 
-        if self.current_epoch == (self.trainer.max_epochs - 1):
-            # We are in the last epoch, calculate ROC and AUC and log to tensorboard
-            self.sample_images()
-            self.calculate_roc_auc()
+        # if self.current_epoch == (self.trainer.max_epochs - 1):
+        #     # We are in the last epoch, calculate ROC and AUC and log to tensorboard
+        #     self.sample_images()
+        #     self.calculate_roc_auc()
 
         self.logger.experiment.log({'avg_val_loss': avg_loss})
 
@@ -139,12 +138,11 @@ class BaseVAE(pl.LightningModule):
 
     def sample_images(self):
         # Get sample reconstruction image
-        test_input, test_label = next(iter(self.sample_dataloader))
+        test_input, _ = next(iter(self.sample_dataloader))
         test_input = test_input.to(self.curr_device)
-        test_label = test_label.to(self.curr_device)
 
-        recons = self.generate(test_input, labels=test_label)
-        samples = self.sample(self.params["batch_size"], self.curr_device, labels=test_label)
+        recons = self.generate(test_input)
+        samples = self.sample(self.params["batch_size"], self.curr_device)
 
         self.logger.experiment.add_images("originals",
                                           self.denormalize(test_input),
@@ -195,20 +193,21 @@ class BaseVAE(pl.LightningModule):
             return optims
 
     def train_dataloader(self):
-        dataloader, self.num_train_imgs = self.get_dataloader(train_split=True, abnormal_data=False, shuffle=True)
+        dataloader, self.num_train_imgs = self.get_dataloader(train_split=True)
 
         return dataloader
 
     def val_dataloader(self):
-        self.sample_dataloader, _ = self.get_dataloader(train_split=False, abnormal_data=False, shuffle=True)
+        self.sample_dataloader, _ = self.get_dataloader(train_split=False)
         self.num_val_imgs = len(self.sample_dataloader)
 
         return self.sample_dataloader
 
-    def get_dataloader(self, train_split: bool, abnormal_data: bool = False, shuffle: bool = True):
+    def get_dataloader(self, train_split: bool):
         transform = self.data_transforms()
 
         split = "train" if train_split else "val"
+        shuffle = True if train_split else False
 
         if self.params['dataset'] == 'celeba':
             if not train_split:
@@ -219,16 +218,10 @@ class BaseVAE(pl.LightningModule):
                              split=split,
                              transform=transform,
                              download=False)
-        elif self.params['dataset'] == 'concrete-cracks':
-            dataset = ConcreteCracksDataset(root_dir=self.params['data_path'],
-                                            split=split,
-                                            abnormal_data=abnormal_data,
-                                            transform=transform)
-        elif self.params['dataset'] == 'SDNET2018':
-            dataset = SDNet2018(root_dir=self.params['data_path'],
-                                split=split,
-                                abnormal_data=abnormal_data,
-                                transform=transform)
+        elif self.params["dataset"] == "test-gui":
+            dataset = TestGUIDataset(root_dir=self.params["data_path"],
+                                     split=split,
+                                     transform=transform)
         elif self.params['dataset'] == 'MNIST':
             dataset = MNIST(root=self.params['data_path'],
                             train=train_split,
@@ -240,7 +233,7 @@ class BaseVAE(pl.LightningModule):
         dataloader = DataLoader(dataset,
                                 batch_size=self.params['batch_size'],
                                 shuffle=shuffle,
-                                drop_last=True,
+                                drop_last=False,
                                 **self.additional_dataloader_args)
 
         return dataloader, len(dataset)
@@ -256,12 +249,8 @@ class BaseVAE(pl.LightningModule):
                                             transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
-        elif self.params['dataset'] == 'concrete-cracks':
-            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
-                                            transforms.ToTensor(),
-                                            SetRange])
-        elif self.params['dataset'] == 'SDNET2018':
-            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
+        elif self.params["dataset"] == "test-gui":
+            transform = transforms.Compose([transforms.Resize(self.params['img_size']),
                                             transforms.ToTensor(),
                                             SetRange])
         elif self.params['dataset'] == 'MNIST':
