@@ -40,11 +40,15 @@ class VanillaVAE(BaseVAE):
         self.fc_mu = nn.Linear(hidden_dims[-1] * 4, latent_dim)
         self.fc_var = nn.Linear(hidden_dims[-1] * 4, latent_dim)
 
+        # self.fc_mu = nn.Linear(3072, latent_dim)
+        # self.fc_var = nn.Linear(3072, latent_dim)
+
         # Build Decoder
         modules = []
 
         # TODO Same as above, redo the hardcoded stuff
         self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+        # self.decoder_input = nn.Linear(latent_dim, 3072)
 
         hidden_dims.reverse()
 
@@ -106,6 +110,7 @@ class VanillaVAE(BaseVAE):
         result = self.decoder_input(z)
         # TODO These hardcoded values should also be changed
         result = result.view(-1, 512, 2, 2)
+        # result = result.view(-1, 512, 2, 3)
         result = self.decoder(result)
         result = self.final_layer(result)
         return result

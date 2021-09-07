@@ -250,7 +250,7 @@ class BaseVAE(pl.LightningModule):
                                             transforms.ToTensor(),
                                             SetRange])
         elif self.params["dataset"] == "test-gui":
-            transform = transforms.Compose([transforms.Resize(self.params['img_size']),
+            transform = transforms.Compose([transforms.Resize((self.params['img_size'], self.params['img_size'])),
                                             transforms.ToTensor(),
                                             SetRange])
         elif self.params['dataset'] == 'MNIST':
