@@ -15,6 +15,7 @@ exp_params:
   weight_decay: 0.0
   scheduler_gamma: 0.95
   dataloader_workers: 4
+  kld_weight: 0.1
 
 trainer_params:
   gpus: [3]
