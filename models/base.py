@@ -32,6 +32,8 @@ class BaseVAE(pl.LightningModule):
         # Used for visualizing
         self.denormalize = lambda x: (x + 1.0) / 2.0
 
+        self.kld_weight = params["kld_weight"]
+
     def encode(self, input: Tensor) -> List[Tensor]:
         raise NotImplementedError
 
